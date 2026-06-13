@@ -9,6 +9,7 @@ import { z } from "zod";
 import { parseSTSource } from "./compiler/parser";
 import { emitMEL } from "./compiler/emitter";
 import { emitAB } from "./compiler/emitter-ab";
+import { looksLikeL5K, extractL5K, joinExtractedRoutines } from "./compiler/l5k_extract";
 
 export interface Diagnostic {
   severity: "INFO" | "WARN" | "MANUAL_PORT" | "ERROR";
@@ -99,10 +100,57 @@ export function translate(
   options?: { memoryMap?: string; labelsCsv?: string }
 ): TranslationResult {
   const diagnostics: Diagnostic[] = [];
+  const timestamp = new Date().toISOString();
+
+  // ── L5K pre-extraction ────────────────────────────────────────────────
+  // Studio 5000 L5K exports are not raw ST — they wrap controller config,
+  // tags, programs, and AOIs in a Pascal-flavored DSL with ST routines
+  // buried in `ST_ROUTINE ... END_ST_ROUTINE` blocks. Detect L5K input and
+  // extract the ST source before handing off to the parser.
+  if (direction === "ab2mel" && looksLikeL5K(source)) {
+    const extracted = extractL5K(source);
+    if (extracted.stRoutines.length === 0) {
+      const inputLines = source.split("\n").length;
+      return {
+        ok: false,
+        output: "",
+        diagnostics: [
+          {
+            severity: "ERROR",
+            code: "AB_MEL_L5K_001",
+            message: `L5K file recognized (controller: ${extracted.controllerName ?? "<unknown>"}, IE_VER ${extracted.ieVer ?? "?"}) but contains no ST_ROUTINE blocks. Found ${extracted.ladderRoutines.length} ladder routine(s) — those are RLL, not Structured Text. Convert ladder to ST in Studio 5000 first, or paste a routine that's already ST.`,
+            line: 1,
+          },
+        ],
+        mappingYaml: "allocations: {}\n",
+        labelsCsv: "Class,Label,DataType,Device,Comment",
+        failureReport: {
+          stage: "l5k_extract",
+          error: "L5K contains no ST routines",
+          traceback: `Found ${extracted.ladderRoutines.length} RLL routines; 0 ST routines`,
+          sourceContext: source.split("\n").slice(0, 8).join("\n"),
+          pipelineState: `L5K detected, no ST extractable`,
+          timestamp,
+          direction,
+          inputLines,
+        },
+        stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
+      };
+    }
+    // Replace source with joined ST routines and continue. Diagnostics
+    // about the extraction itself get prepended.
+    source = joinExtractedRoutines(extracted);
+    diagnostics.push({
+      severity: "INFO",
+      code: "AB_MEL_L5K_002",
+      message: `L5K extracted: ${extracted.stRoutines.length} ST routine(s) from controller "${extracted.controllerName ?? "<unknown>"}". ${extracted.ladderRoutines.length} ladder routine(s) skipped (RLL, not ST).`,
+      line: 1,
+    });
+  }
+
   const sourceLines = source.split("\n");
   const inputLines = sourceLines.length;
   const sourceFile = "<input>";
-  const timestamp = new Date().toISOString();
 
   // Pipeline state tracking
   let currentStage = "init";
@@ -179,7 +227,7 @@ export function translate(
       return {
         ok: !hasErrors,
         output: result.output,
-        diagnostics: result.diagnostics,
+        diagnostics: [...diagnostics, ...result.diagnostics],
         mappingYaml: result.mappingYaml,
         labelsCsv: result.labelsCsv,
         failureReport,

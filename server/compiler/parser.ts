@@ -121,13 +121,25 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
-    // String literal
-    if (source[pos] === "'") {
+    // String literal — IEC standard uses single quotes, but Allen-Bradley
+    // L5K exports and certain Mitsubishi dialects use double quotes. Accept
+    // both. Backslash escapes inside the string are passed through opaquely
+    // (the emitter rewrites them as-needed).
+    if (source[pos] === "'" || source[pos] === '"') {
+      const quote = source[pos];
       const start = pos;
       const startCol = col;
       pos++; col++;
-      while (pos < source.length && source[pos] !== "'") { pos++; col++; }
-      pos++; col++;
+      while (pos < source.length && source[pos] !== quote) {
+        if (source[pos] === "\\" && pos + 1 < source.length) {
+          // Skip the escaped character so an embedded \' or \" doesn't end the string
+          pos += 2; col += 2;
+          continue;
+        }
+        if (source[pos] === "\n") { line++; col = 1; } else { col++; }
+        pos++;
+      }
+      pos++; col++; // closing quote
       tokens.push({ type: "STRING", value: source.slice(start, pos), line, col: startCol });
       continue;
     }
