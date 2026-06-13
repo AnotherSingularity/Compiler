@@ -25,4 +25,30 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// Translations table — stores compiled outputs and validation results
+export const translations = mysqlTable("translations", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  direction: varchar("direction", { length: 10 }).notNull(), // 'ab2mel' | 'mel2ab'
+  sourceHash: varchar("sourceHash", { length: 64 }).notNull(),
+  sourceSizeBytes: int("sourceSizeBytes"),
+  sourceText: text("sourceText"),
+  outputText: text("outputText"),
+  diagnosticsJson: text("diagnosticsJson"),
+  mappingYaml: text("mappingYaml"),
+  translatedNodes: int("translatedNodes").default(0),
+  manualPortCount: int("manualPortCount").default(0),
+  warningCount: int("warningCount").default(0),
+  // Validation columns (nullable until validation runs)
+  validationVerdict: varchar("validationVerdict", { length: 32 }), // 'equivalent' | 'concerns' | 'cannot_determine'
+  validationSummary: text("validationSummary"),
+  validationConcernsJson: text("validationConcernsJson"),
+  validationTokensIn: int("validationTokensIn"),
+  validationTokensOut: int("validationTokensOut"),
+  validationCostCents: int("validationCostCents"),
+  validatedAt: timestamp("validatedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Translation = typeof translations.$inferSelect;
+export type InsertTranslation = typeof translations.$inferInsert;

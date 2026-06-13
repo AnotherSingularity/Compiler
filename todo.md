@@ -39,3 +39,9 @@
 - [x] Bug: BitAccess assign must conditionally BSET/BRST based on RHS, not unconditional
 - [x] Bug: Type conversions (DINT_TO_INT, REAL_TO_DINT) must pass through as-is, not rewrite to INT()/DINT()
 - [x] Bug: MANUAL_PORT instances must flag all subsequent .MEMBER references in same scope
+- [x] v0.1.2: Auth gate — require login before translate/validate
+- [x] v0.1.2: Database schema — translations table with validation columns
+- [x] v0.1.2: Home launcher screen with tool tile (ST Compiler)
+- [x] v0.1.2: Validation layer — opt-in, post-hoc, platform LLM
+- [x] v0.1.2: Validation tab in output UI
+- [x] v0.1.2: Free tier limit (5 validations/month)

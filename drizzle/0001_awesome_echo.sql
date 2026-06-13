@@ -1,0 +1,23 @@
+CREATE TABLE `translations` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`direction` varchar(10) NOT NULL,
+	`sourceHash` varchar(64) NOT NULL,
+	`sourceSizeBytes` int,
+	`sourceText` text,
+	`outputText` text,
+	`diagnosticsJson` text,
+	`mappingYaml` text,
+	`translatedNodes` int DEFAULT 0,
+	`manualPortCount` int DEFAULT 0,
+	`warningCount` int DEFAULT 0,
+	`validationVerdict` varchar(32),
+	`validationSummary` text,
+	`validationConcernsJson` text,
+	`validationTokensIn` int,
+	`validationTokensOut` int,
+	`validationCostCents` int,
+	`validatedAt` timestamp,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `translations_id` PRIMARY KEY(`id`)
+);

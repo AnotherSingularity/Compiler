@@ -8,6 +8,13 @@
       "when": 1763372440610,
       "tag": "0000_elite_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1781357019632,
+      "tag": "0001_awesome_echo",
+      "breakpoints": true
     }
   ]
 }

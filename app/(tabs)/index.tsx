@@ -44,10 +44,25 @@ const C = {
   sevError: "#b04a3a",
 };
 
+interface ValidationResult {
+  ok: boolean;
+  verdict?: string;
+  concerns?: Array<{ severity: string; line: number; message: string }>;
+  summary?: string;
+  costCents?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  error_code?: string;
+  message?: string;
+}
+
 export default function TranslateScreen() {
   const [direction, setDirection] = useState<Direction>("ab2mel");
   const [sourceCode, setSourceCode] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [validation, setValidation] = useState<ValidationResult | null>(null);
+  const [translationId, setTranslationId] = useState<number | null>(null);
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [pickedFile, setPickedFile] = useState<{ name: string; size: number } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -78,13 +93,18 @@ export default function TranslateScreen() {
     } catch { Alert.alert("File Error", "Could not read file."); }
   };
 
+  const validateMutation = trpc.validate.useMutation();
+
   const handleTranslate = useCallback(async () => {
     if (!sourceCode.trim()) { Alert.alert("No Input", "Upload a file or paste ST code."); return; }
     setIsTranslating(true);
+    setValidation(null);
+    setTranslationId(null);
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const res = await translateMutation.mutateAsync({ direction, source: sourceCode });
       setResult(res);
+      if ((res as any).translationId) setTranslationId((res as any).translationId);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
     } catch (error: any) {
       Alert.alert("Error", error?.message || "Translation failed.");
@@ -204,9 +224,28 @@ export default function TranslateScreen() {
             </Text>
 
             {/* Actions */}
-            <View style={{ flexDirection: "row", gap: 24, marginTop: 16, marginBottom: 16 }}>
+            <View style={{ flexDirection: "row", gap: 24, marginTop: 16, marginBottom: 16, flexWrap: "wrap" }}>
               <TouchableOpacity onPress={handleDownload}><Text style={s.actionLink}>Download .st</Text></TouchableOpacity>
               <TouchableOpacity onPress={handleCopyOutput}><Text style={s.actionLink}>{copied ? "Copied" : "Copy output"}</Text></TouchableOpacity>
+              {translationId && (
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!translationId || isValidating) return;
+                    setIsValidating(true);
+                    try {
+                      const res = await validateMutation.mutateAsync({ translationId });
+                      setValidation(res as ValidationResult);
+                    } catch (e: any) {
+                      setValidation({ ok: false, message: e?.message || "Validation failed" });
+                    } finally { setIsValidating(false); }
+                  }}
+                  disabled={isValidating}
+                >
+                  <Text style={[s.actionLink, isValidating && { color: C.textMuted }]}>
+                    {isValidating ? "Validating..." : "Validate with AI"}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Output code */}
@@ -229,6 +268,53 @@ export default function TranslateScreen() {
                     {d.line > 0 && <Text style={s.diagLine}>{d.line}</Text>}
                   </View>
                 ))}
+              </View>
+            )}
+
+            {/* Validation Results (opt-in, post-hoc) */}
+            {validation && (
+              <View style={{ marginTop: 24 }}>
+                <Text style={s.sectionHead}>Validation</Text>
+                <View style={s.hairline} />
+                {validation.ok && validation.verdict ? (
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={[s.statsLine, {
+                      color: validation.verdict === "equivalent" ? C.gold
+                        : validation.verdict === "concerns" ? C.sevWarn
+                        : C.textMuted,
+                      fontStyle: "normal", fontSize: 16, fontWeight: "500"
+                    }]}>
+                      {validation.verdict === "equivalent" ? "Equivalent"
+                        : validation.verdict === "concerns" ? "Concerns found"
+                        : "Could not determine"}
+                    </Text>
+                    {validation.summary && (
+                      <Text style={{ fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 14, color: C.textPrimary, marginTop: 8, lineHeight: 22 }}>
+                        {validation.summary}
+                      </Text>
+                    )}
+                    {validation.concerns && validation.concerns.length > 0 && (
+                      <View style={{ marginTop: 12 }}>
+                        {validation.concerns.map((c, i) => (
+                          <View key={i} style={s.diagRow}>
+                            <Text style={[s.diagSev, { color: c.severity === "error" ? C.sevError : c.severity === "warn" ? C.sevWarn : C.sevInfo }]}>
+                              {c.severity[0].toUpperCase()}
+                            </Text>
+                            <Text style={s.diagMsg}>{c.message}</Text>
+                            {c.line > 0 && <Text style={s.diagLine}>{c.line}</Text>}
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    <Text style={{ fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 11, fontStyle: "italic", color: C.textMuted, marginTop: 12 }}>
+                      Validation by AI · {((validation.costCents || 0) / 100).toFixed(2)}¢ · {(validation.tokensIn || 0) + (validation.tokensOut || 0)} tokens · advisory only
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={{ fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 14, color: C.sevError, marginTop: 8 }}>
+                    {validation.message || "Validation failed"}
+                  </Text>
+                )}
               </View>
             )}
           </View>
