@@ -147,6 +147,17 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
       case "assign": {
         const n = node as AssignNode;
         out.push(`${indent}${provenance(n.line)}`);
+        // Check BOTH sides for manual-ported instance references FIRST
+        const targetBase = getBaseIdent(n.target);
+        if (manualPortInstances.has(targetBase)) {
+          // LHS is a manual-ported instance member — entire assignment is manual port
+          const target = emitExpr(n.target);
+          const value = emitExpr(n.value);
+          diags.push({ severity: "MANUAL_PORT", code: "AB_MEL_PID_002", message: `Assignment to manual-ported instance member: ${target}`, line: n.line });
+          out.push(`${indent}(* MANUAL PORT: ${target} := ${value} — instance has no MEL equivalent *)`);
+          translated++;
+          break;
+        }
         const target = emitExpr(n.target);
         const value = emitExpr(n.value);
         // Bit-write: if target is BTEST, conditionally BSET/BRST based on RHS
@@ -155,13 +166,11 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
           if (match) {
             const word = match[1];
             const bit = match[2];
-            // If RHS is a constant, emit directly
             if (value === "1" || value === "TRUE") {
               out.push(`${indent}BSET(TRUE, ${word}, ${bit});`);
             } else if (value === "0" || value === "FALSE") {
               out.push(`${indent}BRST(TRUE, ${word}, ${bit});`);
             } else {
-              // RHS is a variable/expression — conditional set/reset
               out.push(`${indent}IF ${value} THEN`);
               out.push(`${indent}  BSET(TRUE, ${word}, ${bit});`);
               out.push(`${indent}ELSE`);
@@ -171,13 +180,6 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
             translated++;
             break;
           }
-        }
-        // Check if target references a MANUAL_PORT instance
-        if (manualPortInstances.has(getBaseIdent(n.target))) {
-          diags.push({ severity: "MANUAL_PORT", code: "AB_MEL_PID_002", message: `Reference to manual-ported instance member: ${target}`, line: n.line });
-          out.push(`${indent}(* MANUAL PORT: ${target} := ${value} — instance has no MEL equivalent *)`);
-          translated++;
-          break;
         }
         out.push(`${indent}${target} := ${value};`);
         translated++;
