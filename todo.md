@@ -16,3 +16,6 @@
 - [x] Fix: translation output not showing after file upload + translate
 - [x] Fix: add downloadable file export on output screen (save .st file to device)
 - [x] Fix: ensure full end-to-end flow works (upload → translate → view → download)
+- [x] Fix: rebuild translation engine to do real AB→MEL compilation (not just member swaps)
+- [x] Fix: download/share broken on Android — must use Sharing API correctly
+- [x] Fix: output screen must show translated result immediately after translate

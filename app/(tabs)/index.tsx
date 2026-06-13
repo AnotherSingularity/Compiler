@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   ScrollView,
   Text,
@@ -12,147 +12,161 @@ import {
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
 
 type Direction = "ab2mel" | "mel2ab";
 
+interface TranslationResult {
+  ok: boolean;
+  output: string;
+  diagnostics: Array<{ severity: string; code: string; message: string; line: number }>;
+  mappingYaml: string;
+  labelsCsv: string;
+  stats: { inputLines: number; outputLines: number; warningCount: number; manualPortCount: number };
+}
+
 export default function TranslateScreen() {
   const [direction, setDirection] = useState<Direction>("ab2mel");
   const [sourceCode, setSourceCode] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
+  const [result, setResult] = useState<TranslationResult | null>(null);
   const [pickedFile, setPickedFile] = useState<{ name: string; size: number } | null>(null);
-  const router = useRouter();
+  const [copied, setCopied] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
 
   const translateMutation = trpc.translate.useMutation();
 
   const handleDirectionChange = (dir: Direction) => {
-    if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setDirection(dir);
+    setResult(null);
   };
 
-  const handlePasteFromClipboard = async () => {
-    try {
-      const text = await Clipboard.getStringAsync();
-      if (text) {
-        setSourceCode(text);
-        setPickedFile(null);
-        if (Platform.OS !== "web") {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
-      }
-    } catch {
-      // Clipboard not available
+  const handlePaste = async () => {
+    const text = await Clipboard.getStringAsync();
+    if (text) {
+      setSourceCode(text);
+      setPickedFile(null);
+      setResult(null);
+      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
   const handlePickFile = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["text/plain", "text/xml", "application/xml", "*/*"],
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ["text/plain", "text/xml", "application/xml", "application/octet-stream", "*/*"],
         copyToCacheDirectory: true,
       });
-
-      if (result.canceled) return;
-
-      const asset = result.assets[0];
+      if (res.canceled) return;
+      const asset = res.assets[0];
       if (!asset) return;
 
-      // Read file content
       let content: string;
-      if (Platform.OS === "web" && asset.file) {
+      if (Platform.OS as string === "web" && asset.file) {
         content = await asset.file.text();
       } else {
-        content = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
+        content = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.UTF8 });
       }
 
       if (content) {
         setSourceCode(content);
         setPickedFile({ name: asset.name, size: asset.size || content.length });
-        if (Platform.OS !== "web") {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
+        setResult(null);
+        if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-    } catch (error: any) {
-      Alert.alert("File Error", "Could not read the selected file. Make sure it's a text file.");
+    } catch {
+      Alert.alert("File Error", "Could not read file. Make sure it's a text file (.st, .txt, .L5X).");
     }
   };
 
   const handleTranslate = useCallback(async () => {
     if (!sourceCode.trim()) {
-      Alert.alert("No Input", "Please paste ST code or upload a text file to translate.");
+      Alert.alert("No Input", "Upload a file or paste ST code first.");
       return;
     }
-
     setIsTranslating(true);
-    if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const result = await translateMutation.mutateAsync({
-        direction,
-        source: sourceCode,
-      });
-
-      // Save to history
-      const historyKey = "translation_history";
-      const existing = await AsyncStorage.getItem(historyKey);
-      const history = existing ? JSON.parse(existing) : [];
-      history.unshift({
-        id: Date.now().toString(),
-        direction,
-        timestamp: new Date().toISOString(),
-        inputLines: result.stats.inputLines,
-        outputLines: result.stats.outputLines,
-        warningCount: result.stats.warningCount,
-        manualPortCount: result.stats.manualPortCount,
-        source: sourceCode.substring(0, 200),
-        output: result.output,
-        diagnostics: result.diagnostics,
-        mappingYaml: result.mappingYaml,
-        ok: result.ok,
-      });
-      if (history.length > 50) history.pop();
-      await AsyncStorage.setItem(historyKey, JSON.stringify(history));
-
-      // Navigate to output screen
-      await AsyncStorage.setItem("last_translation", JSON.stringify(result));
-      router.push("/output" as any);
-
+      const res = await translateMutation.mutateAsync({ direction, source: sourceCode });
+      setResult(res);
+      // Scroll to output
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
       if (Platform.OS !== "web") {
-        if (result.ok) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        } else {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        }
+        Haptics.notificationAsync(res.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error);
       }
     } catch (error: any) {
-      Alert.alert("Translation Error", error?.message || "Failed to translate. Please try again.");
-      if (Platform.OS !== "web") {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      }
+      Alert.alert("Error", error?.message || "Translation failed.");
+      if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setIsTranslating(false);
     }
-  }, [sourceCode, direction, translateMutation, router]);
+  }, [sourceCode, direction, translateMutation]);
+
+  const handleCopyOutput = async () => {
+    if (!result?.output) return;
+    await Clipboard.setStringAsync(result.output);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleDownload = async () => {
+    if (!result?.output) return;
+
+    const filename = direction === "ab2mel" ? "translated_MEL.st" : "translated_AB.st";
+
+    if (Platform.OS as string === "web") {
+      const blob = new Blob([result.output], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    // Android/iOS: write to cache then share
+    try {
+      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.writeAsStringAsync(fileUri, result.output, { encoding: FileSystem.EncodingType.UTF8 });
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/plain",
+          dialogTitle: `Save ${filename}`,
+          UTI: "public.plain-text",
+        });
+      } else {
+        // Fallback: copy to documents dir
+        const docUri = `${FileSystem.documentDirectory}${filename}`;
+        await FileSystem.copyAsync({ from: fileUri, to: docUri });
+        Alert.alert("Saved", `File saved to app documents:\n${filename}`);
+      }
+      if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err: any) {
+      Alert.alert("Download Error", err?.message || "Could not save file.");
+    }
+  };
 
   return (
     <ScreenContainer className="px-4 pt-2">
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
+        ref={scrollRef}
+        contentContainerStyle={{ paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
       >
         {/* Header */}
-        <View className="items-center mb-4 mt-2">
+        <View className="items-center mb-3 mt-2">
           <Text className="text-2xl font-bold text-foreground">AB↔MEL Compiler</Text>
           <Text className="text-sm text-muted mt-1">Structured Text Translation</Text>
         </View>
@@ -164,9 +178,7 @@ export default function TranslateScreen() {
             onPress={() => handleDirectionChange("ab2mel")}
             activeOpacity={0.7}
           >
-            <Text
-              className={`font-semibold text-base ${direction === "ab2mel" ? "text-background" : "text-muted"}`}
-            >
+            <Text className={`font-bold text-base ${direction === "ab2mel" ? "text-background" : "text-muted"}`}>
               AB → MEL
             </Text>
           </TouchableOpacity>
@@ -175,83 +187,59 @@ export default function TranslateScreen() {
             onPress={() => handleDirectionChange("mel2ab")}
             activeOpacity={0.7}
           >
-            <Text
-              className={`font-semibold text-base ${direction === "mel2ab" ? "text-background" : "text-muted"}`}
-            >
+            <Text className={`font-bold text-base ${direction === "mel2ab" ? "text-background" : "text-muted"}`}>
               MEL → AB
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Direction Info */}
-        <View className="bg-surface rounded-xl p-3 mb-4 border border-border">
-          <Text className="text-xs text-muted">
-            {direction === "ab2mel"
-              ? "Paste Allen-Bradley Studio 5000 Structured Text or upload a file. Output will be GX Works2 compatible."
-              : "Paste Mitsubishi GX Works2 Structured Text or upload a file. Output will be Studio 5000 compatible."}
-          </Text>
-        </View>
+        {/* File Upload */}
+        <TouchableOpacity
+          onPress={handlePickFile}
+          className="bg-surface border-2 border-dashed border-primary/40 rounded-xl p-5 items-center mb-3"
+          activeOpacity={0.7}
+        >
+          {pickedFile ? (
+            <View className="items-center">
+              <Text className="text-success font-bold text-base">File Loaded</Text>
+              <Text className="text-sm text-muted mt-1">{pickedFile.name} ({(pickedFile.size / 1024).toFixed(1)} KB)</Text>
+            </View>
+          ) : (
+            <View className="items-center">
+              <Text className="text-primary font-bold text-base">Upload ST File</Text>
+              <Text className="text-xs text-muted mt-1">.st, .txt, .L5X — tap to browse</Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
-        {/* Input Method: File Upload */}
-        <View className="mb-3">
-          <TouchableOpacity
-            onPress={handlePickFile}
-            className="bg-surface border-2 border-dashed border-border rounded-xl p-4 items-center"
-            activeOpacity={0.7}
-          >
-            {pickedFile ? (
-              <View className="items-center">
-                <Text className="text-success font-semibold text-sm">File loaded</Text>
-                <Text className="text-xs text-muted mt-1">
-                  {pickedFile.name} ({(pickedFile.size / 1024).toFixed(1)} KB)
-                </Text>
-              </View>
-            ) : (
-              <View className="items-center">
-                <Text className="text-primary font-semibold text-sm">Upload File</Text>
-                <Text className="text-xs text-muted mt-1">.st, .txt, .L5X or any text file</Text>
-              </View>
-            )}
+        {/* Or paste */}
+        <View className="flex-row justify-between items-center mb-2">
+          <Text className="text-sm font-medium text-foreground">Or paste code directly</Text>
+          <TouchableOpacity onPress={handlePaste} className="bg-primary/10 px-3 py-1.5 rounded-lg" activeOpacity={0.7}>
+            <Text className="text-xs text-primary font-bold">Paste from Clipboard</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Source Code Input */}
-        <View className="mb-4">
-          <View className="flex-row justify-between items-center mb-2">
-            <Text className="text-sm font-medium text-foreground">Or paste code</Text>
-            <TouchableOpacity
-              onPress={handlePasteFromClipboard}
-              className="bg-surface px-3 py-1.5 rounded-lg border border-border"
-              activeOpacity={0.7}
-            >
-              <Text className="text-xs text-primary font-medium">Paste</Text>
-            </TouchableOpacity>
-          </View>
-          <TextInput
-            className="bg-surface border border-border rounded-xl p-4 text-foreground min-h-[200px]"
-            style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, lineHeight: 20 }}
-            multiline
-            textAlignVertical="top"
-            placeholder={
-              direction === "ab2mel"
-                ? "// Paste AB Structured Text here\nIF RunMode THEN\n  Speed := SetPoint * 0.95;\n  TON(RunTimer);\nEND_IF;"
-                : "// Paste MEL Structured Text here\nIF M100 THEN\n  D1000 := D1002 * 95 / 100;\n  RunTimer(IN := M100, PT := T#5S);\nEND_IF;"
-            }
-            placeholderTextColor="#64748B"
-            value={sourceCode}
-            onChangeText={(text) => {
-              setSourceCode(text);
-              if (pickedFile) setPickedFile(null);
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            spellCheck={false}
-          />
-        </View>
+        <TextInput
+          className="bg-surface border border-border rounded-xl p-4 text-foreground min-h-[180px] mb-4"
+          style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, lineHeight: 20 }}
+          multiline
+          textAlignVertical="top"
+          placeholder={direction === "ab2mel"
+            ? "// AB Structured Text\nIF RunMode THEN\n  Speed := SetPoint * 0.95;\n  TON(RunTimer);\nEND_IF;"
+            : "// MEL Structured Text\nIF M100 THEN\n  RunTimer(IN := M100, PT := T#5000);\nEND_IF;"
+          }
+          placeholderTextColor="#64748B"
+          value={sourceCode}
+          onChangeText={(t) => { setSourceCode(t); setPickedFile(null); setResult(null); }}
+          autoCapitalize="none"
+          autoCorrect={false}
+          spellCheck={false}
+        />
 
         {/* Translate Button */}
         <TouchableOpacity
-          className={`w-full py-4 rounded-xl items-center justify-center ${isTranslating ? "bg-primary/70" : "bg-primary"}`}
+          className={`w-full py-4 rounded-xl items-center ${isTranslating ? "bg-primary/60" : "bg-primary"}`}
           onPress={handleTranslate}
           disabled={isTranslating}
           activeOpacity={0.8}
@@ -259,20 +247,102 @@ export default function TranslateScreen() {
           {isTranslating ? (
             <View className="flex-row items-center gap-2">
               <ActivityIndicator color="white" size="small" />
-              <Text className="text-background font-bold text-base">Translating...</Text>
+              <Text className="text-background font-bold text-lg">Compiling...</Text>
             </View>
           ) : (
-            <Text className="text-background font-bold text-base">Translate</Text>
+            <Text className="text-background font-bold text-lg">Compile & Translate</Text>
           )}
         </TouchableOpacity>
 
-        {/* Quick Info */}
-        <View className="mt-4 bg-surface rounded-xl p-4 border border-border">
-          <Text className="text-xs font-semibold text-foreground mb-2">V1 Supported Constructs</Text>
-          <Text className="text-xs text-muted leading-5">
-            IF/ELSIF/ELSE, CASE, FOR, WHILE, REPEAT, TON/TOF/RTO, CTU/CTD/CTUD, UDT/STRUCT, Arrays, AOI/FB, Type conversions, Comments
-          </Text>
-        </View>
+        {/* === OUTPUT SECTION === */}
+        {result && (
+          <View className="mt-6">
+            {/* Status */}
+            <View className="flex-row items-center gap-2 mb-3">
+              <View className={`w-3 h-3 rounded-full ${result.ok ? "bg-success" : "bg-error"}`} />
+              <Text className={`font-bold text-base ${result.ok ? "text-success" : "text-error"}`}>
+                {result.ok ? "Translation Complete" : "Translation Has Errors"}
+              </Text>
+            </View>
+
+            {/* Stats */}
+            <View className="flex-row bg-surface rounded-xl p-3 mb-3 border border-border">
+              <View className="flex-1 items-center">
+                <Text className="text-lg font-bold text-foreground">{result.stats.inputLines}</Text>
+                <Text className="text-xs text-muted">Input Lines</Text>
+              </View>
+              <View className="flex-1 items-center">
+                <Text className="text-lg font-bold text-foreground">{result.stats.outputLines}</Text>
+                <Text className="text-xs text-muted">Output Lines</Text>
+              </View>
+              <View className="flex-1 items-center">
+                <Text className="text-lg font-bold text-warning">{result.stats.warningCount}</Text>
+                <Text className="text-xs text-muted">Warnings</Text>
+              </View>
+              <View className="flex-1 items-center">
+                <Text className="text-lg font-bold" style={{ color: "#F97316" }}>{result.stats.manualPortCount}</Text>
+                <Text className="text-xs text-muted">Manual</Text>
+              </View>
+            </View>
+
+            {/* Download Button — BIG and obvious */}
+            <TouchableOpacity
+              onPress={handleDownload}
+              className="w-full py-4 rounded-xl items-center bg-success mb-3"
+              activeOpacity={0.8}
+            >
+              <Text className="text-background font-bold text-lg">
+                Download {direction === "ab2mel" ? "MEL" : "AB"} File (.st)
+              </Text>
+            </TouchableOpacity>
+
+            {/* Copy Button */}
+            <TouchableOpacity
+              onPress={handleCopyOutput}
+              className="w-full py-3 rounded-xl items-center bg-surface border border-border mb-4"
+              activeOpacity={0.7}
+            >
+              <Text className="text-primary font-bold">{copied ? "Copied to Clipboard!" : "Copy Output to Clipboard"}</Text>
+            </TouchableOpacity>
+
+            {/* Output Code */}
+            <Text className="text-sm font-bold text-foreground mb-2">Translated Output:</Text>
+            <View className="bg-surface rounded-xl border border-border p-4 max-h-[400px]">
+              <ScrollView nestedScrollEnabled>
+                <Text
+                  className="text-foreground"
+                  style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, lineHeight: 18 }}
+                  selectable
+                >
+                  {result.output}
+                </Text>
+              </ScrollView>
+            </View>
+
+            {/* Diagnostics */}
+            {result.diagnostics.length > 0 && (
+              <View className="mt-4">
+                <Text className="text-sm font-bold text-foreground mb-2">
+                  Diagnostics ({result.diagnostics.length}):
+                </Text>
+                {result.diagnostics.map((d, i) => (
+                  <View key={i} className="bg-surface rounded-lg p-3 mb-2 border border-border">
+                    <View className="flex-row items-center gap-2">
+                      <View className="w-2 h-2 rounded-full" style={{
+                        backgroundColor: d.severity === "ERROR" ? "#EF4444" : d.severity === "WARN" ? "#EAB308" : d.severity === "MANUAL_PORT" ? "#F97316" : "#6B7280"
+                      }} />
+                      <Text className="text-xs font-bold" style={{
+                        color: d.severity === "ERROR" ? "#EF4444" : d.severity === "WARN" ? "#EAB308" : d.severity === "MANUAL_PORT" ? "#F97316" : "#6B7280"
+                      }}>{d.severity}</Text>
+                      <Text className="text-xs text-muted">Line {d.line}</Text>
+                    </View>
+                    <Text className="text-sm text-foreground mt-1">{d.message}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
     </ScreenContainer>
   );
