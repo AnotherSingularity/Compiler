@@ -24,3 +24,11 @@
 - [x] Patch v0.1.1: Count translated_nodes accurately (not 0)
 - [x] Patch v0.1.1: Apply restrained serif visual system (Section C palette)
 - [x] Patch v0.1.1: Remove all blue/green/shadows/border-radius from UI
+- [x] CRITICAL: Skip comment blocks when matching untranslatable functions (false positives)
+- [x] CRITICAL: Only match function CALLS (name followed by parens+args as statement), not type annotations
+- [x] CRITICAL: Rewrite & to AND (bitwise/logical operator)
+- [x] CRITICAL: Rewrite DINT bit access .N to proper MEL bit extraction
+- [x] CRITICAL: Emit provenance comments on EVERY translated statement
+- [x] CRITICAL: Emit VAR/VAR_GLOBAL declaration blocks in output
+- [x] CRITICAL: MANUAL_PORT parameter dump must list PID loop params (.SP, .Kp, .Ki, etc.)
+- [x] CRITICAL: Do not destroy multi-line comments or leave orphaned continuation lines
