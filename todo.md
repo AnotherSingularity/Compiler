@@ -32,3 +32,7 @@
 - [x] CRITICAL: Emit VAR/VAR_GLOBAL declaration blocks in output
 - [x] CRITICAL: MANUAL_PORT parameter dump must list PID loop params (.SP, .Kp, .Ki, etc.)
 - [x] CRITICAL: Do not destroy multi-line comments or leave orphaned continuation lines
+- [x] REBUILD: Implement real ST parser (tokenizer + recursive descent AST)
+- [x] REBUILD: IR walker that transforms nodes (not regex on text)
+- [x] REBUILD: FunctionCall IR nodes matched against untranslatable rules
+- [x] REBUILD: Emitter walks AST to produce MEL ST output
