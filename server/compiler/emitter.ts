@@ -69,6 +69,41 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
     return "";
   }
 
+  // === PRE-PASS: collect all manual-ported instances before emitting ===
+  // This ensures that member references appearing BEFORE or AFTER the call are caught.
+  function collectManualPortInstances(nodes: ASTNode[]) {
+    for (const node of nodes) {
+      if (node.kind === "call") {
+        const n = node as CallNode;
+        if (UNTRANSLATABLE[n.name] && n.args[0]?.kind === "ident") {
+          manualPortInstances.add((n.args[0] as IdentNode).name);
+        }
+      } else if (node.kind === "function_call") {
+        const n = node as FunctionCallNode;
+        if (UNTRANSLATABLE[n.name] && n.args[0]?.kind === "ident") {
+          manualPortInstances.add((n.args[0] as IdentNode).name);
+        }
+      } else if (node.kind === "if") {
+        const n = node as IfNode;
+        collectManualPortInstances(n.thenBlock);
+        for (const elif of n.elsifBranches) collectManualPortInstances(elif.block);
+        if (n.elseBlock) collectManualPortInstances(n.elseBlock);
+      } else if (node.kind === "for") {
+        collectManualPortInstances((node as ForNode).body);
+      } else if (node.kind === "while") {
+        collectManualPortInstances((node as WhileNode).body);
+      } else if (node.kind === "repeat") {
+        collectManualPortInstances((node as RepeatNode).body);
+      } else if (node.kind === "case") {
+        const n = node as CaseNode;
+        for (const br of n.branches) collectManualPortInstances(br.block);
+        if (n.elseBlock) collectManualPortInstances(n.elseBlock);
+      }
+    }
+  }
+  // Run the pre-pass on the full AST
+  collectManualPortInstances(ast);
+
   function provenance(line: number): string {
     const orig = sourceLines[line - 1]?.trim() || "";
     return `// [AB→MEL] src: ${sourceFile} line ${line} | orig: "${orig}"`;
