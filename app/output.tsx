@@ -6,8 +6,11 @@ import {
   TouchableOpacity,
   FlatList,
   Platform,
+  Alert,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -47,6 +50,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 export default function OutputScreen() {
   const [activeTab, setActiveTab] = useState<TabName>("output");
   const [result, setResult] = useState<TranslationResult | null>(null);
+  const [copied, setCopied] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -62,8 +66,81 @@ export default function OutputScreen() {
 
   const handleCopy = async (text: string) => {
     await Clipboard.setStringAsync(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
     if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!result?.output) return;
+
+    if (Platform.OS as string === "web") {
+      // Web: trigger browser download
+      const blob = new Blob([result.output], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "translated_output.st";
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    // Native: write file and share
+    try {
+      const fileUri = FileSystem.documentDirectory + "translated_output.st";
+      await FileSystem.writeAsStringAsync(fileUri, result.output, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/plain",
+          dialogTitle: "Save Translated ST File",
+          UTI: "public.plain-text",
+        });
+      } else {
+        Alert.alert("Saved", `File saved to app storage:\n${fileUri}`);
+      }
+
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error: any) {
+      Alert.alert("Error", "Could not save file: " + (error?.message || "Unknown error"));
+    }
+  };
+
+  const handleDownloadMapping = async () => {
+    if (!result?.mappingYaml) return;
+
+    if (Platform.OS as string === "web") {
+      const blob = new Blob([result.mappingYaml], { type: "text/yaml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "mapping.yaml";
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    try {
+      const fileUri = FileSystem.documentDirectory + "mapping.yaml";
+      await FileSystem.writeAsStringAsync(fileUri, result.mappingYaml, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/yaml",
+          dialogTitle: "Save Mapping File",
+        });
+      }
+    } catch (error: any) {
+      Alert.alert("Error", "Could not save file: " + (error?.message || "Unknown error"));
     }
   };
 
@@ -74,10 +151,12 @@ export default function OutputScreen() {
   if (!result) {
     return (
       <ScreenContainer className="px-4 pt-4">
-        <Text className="text-foreground text-center mt-10">No translation result available.</Text>
-        <TouchableOpacity onPress={handleBack} className="mt-4 items-center">
-          <Text className="text-primary font-semibold">Go Back</Text>
-        </TouchableOpacity>
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-foreground text-center text-base">No translation result available.</Text>
+          <TouchableOpacity onPress={handleBack} className="mt-4 bg-primary px-6 py-3 rounded-xl">
+            <Text className="text-background font-semibold">Go Back</Text>
+          </TouchableOpacity>
+        </View>
       </ScreenContainer>
     );
   }
@@ -90,32 +169,47 @@ export default function OutputScreen() {
           <Text className="text-primary font-semibold text-base">← Back</Text>
         </TouchableOpacity>
         <View className="flex-row items-center gap-2">
-          <View className={`w-2 h-2 rounded-full ${result.ok ? "bg-success" : "bg-error"}`} />
-          <Text className="text-sm text-muted">{result.ok ? "Success" : "Errors"}</Text>
+          <View className={`w-2.5 h-2.5 rounded-full ${result.ok ? "bg-success" : "bg-error"}`} />
+          <Text className={`text-sm font-medium ${result.ok ? "text-success" : "text-error"}`}>
+            {result.ok ? "Translation Complete" : "Errors Found"}
+          </Text>
         </View>
       </View>
 
       {/* Stats Bar */}
       <View className="flex-row bg-surface rounded-xl p-3 mb-3 border border-border">
         <View className="flex-1 items-center">
-          <Text className="text-xs text-muted">In</Text>
-          <Text className="text-sm font-semibold text-foreground">{result.stats.inputLines}</Text>
+          <Text className="text-xs text-muted">Input</Text>
+          <Text className="text-base font-bold text-foreground">{result.stats.inputLines}</Text>
+          <Text className="text-xs text-muted">lines</Text>
         </View>
         <View className="flex-1 items-center">
-          <Text className="text-xs text-muted">Out</Text>
-          <Text className="text-sm font-semibold text-foreground">{result.stats.outputLines}</Text>
+          <Text className="text-xs text-muted">Output</Text>
+          <Text className="text-base font-bold text-foreground">{result.stats.outputLines}</Text>
+          <Text className="text-xs text-muted">lines</Text>
         </View>
         <View className="flex-1 items-center">
-          <Text className="text-xs text-muted">Warn</Text>
-          <Text className="text-sm font-semibold text-warning">{result.stats.warningCount}</Text>
+          <Text className="text-xs text-muted">Warnings</Text>
+          <Text className="text-base font-bold text-warning">{result.stats.warningCount}</Text>
         </View>
         <View className="flex-1 items-center">
           <Text className="text-xs text-muted">Manual</Text>
-          <Text className="text-sm font-semibold" style={{ color: "#F97316" }}>
+          <Text className="text-base font-bold" style={{ color: "#F97316" }}>
             {result.stats.manualPortCount}
           </Text>
         </View>
       </View>
+
+      {/* Download Button - prominent */}
+      <TouchableOpacity
+        onPress={handleDownload}
+        className="w-full py-3.5 rounded-xl items-center justify-center bg-success mb-3"
+        activeOpacity={0.8}
+      >
+        <Text className="text-background font-bold text-base">
+          Download Translated File (.st)
+        </Text>
+      </TouchableOpacity>
 
       {/* Tabs */}
       <View className="flex-row bg-surface rounded-xl p-1 mb-3 border border-border">
@@ -142,16 +236,19 @@ export default function OutputScreen() {
             <View className="flex-row justify-end mb-2 gap-2">
               <TouchableOpacity
                 onPress={() => handleCopy(result.output)}
-                className="bg-surface px-3 py-1.5 rounded-lg border border-border"
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
                 activeOpacity={0.7}
               >
-                <Text className="text-xs text-primary font-medium">Copy</Text>
+                <Text className="text-sm text-primary font-medium">
+                  {copied ? "Copied!" : "Copy All"}
+                </Text>
               </TouchableOpacity>
             </View>
             <ScrollView className="flex-1 bg-surface rounded-xl border border-border p-4">
               <Text
                 className="text-foreground"
                 style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, lineHeight: 18 }}
+                selectable
               >
                 {result.output || "// No output generated"}
               </Text>
@@ -167,7 +264,7 @@ export default function OutputScreen() {
               <View className="bg-surface rounded-xl p-3 mb-2 border border-border">
                 <View className="flex-row items-center gap-2 mb-1">
                   <View
-                    className="w-2 h-2 rounded-full"
+                    className="w-2.5 h-2.5 rounded-full"
                     style={{ backgroundColor: SEVERITY_COLORS[item.severity] }}
                   />
                   <Text
@@ -178,17 +275,19 @@ export default function OutputScreen() {
                   </Text>
                   <Text className="text-xs text-muted">{item.code}</Text>
                   {item.line > 0 && (
-                    <Text className="text-xs text-muted">Line {item.line}</Text>
+                    <Text className="text-xs text-muted ml-auto">Line {item.line}</Text>
                   )}
                 </View>
-                <Text className="text-sm text-foreground">{item.message}</Text>
+                <Text className="text-sm text-foreground mt-1">{item.message}</Text>
               </View>
             )}
             ListEmptyComponent={
-              <View className="items-center py-8">
-                <Text className="text-success font-medium">No diagnostics — clean translation</Text>
+              <View className="items-center py-8 bg-surface rounded-xl border border-border">
+                <Text className="text-success font-semibold text-base">Clean Translation</Text>
+                <Text className="text-muted text-sm mt-1">No diagnostics emitted</Text>
               </View>
             }
+            contentContainerStyle={{ paddingBottom: 16 }}
           />
         )}
 
@@ -196,19 +295,27 @@ export default function OutputScreen() {
           <View className="flex-1">
             <View className="flex-row justify-end mb-2 gap-2">
               <TouchableOpacity
-                onPress={() => handleCopy(result.mappingYaml)}
-                className="bg-surface px-3 py-1.5 rounded-lg border border-border"
+                onPress={handleDownloadMapping}
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
                 activeOpacity={0.7}
               >
-                <Text className="text-xs text-primary font-medium">Copy</Text>
+                <Text className="text-sm text-primary font-medium">Download YAML</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleCopy(result.mappingYaml)}
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
+                activeOpacity={0.7}
+              >
+                <Text className="text-sm text-primary font-medium">Copy</Text>
               </TouchableOpacity>
             </View>
             <ScrollView className="flex-1 bg-surface rounded-xl border border-border p-4">
               <Text
                 className="text-foreground"
                 style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, lineHeight: 18 }}
+                selectable
               >
-                {result.mappingYaml || "# No allocations"}
+                {result.mappingYaml || "# No device allocations"}
               </Text>
             </ScrollView>
           </View>

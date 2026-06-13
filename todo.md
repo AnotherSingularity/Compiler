@@ -13,3 +13,6 @@
 - [x] Add diagnostic severity color coding
 - [x] Generate custom app icon
 - [x] Update app.config.ts branding
+- [x] Fix: translation output not showing after file upload + translate
+- [x] Fix: add downloadable file export on output screen (save .st file to device)
+- [x] Fix: ensure full end-to-end flow works (upload → translate → view → download)
