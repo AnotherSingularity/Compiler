@@ -1,7 +1,8 @@
 /**
  * AB↔MEL Structured Text Translation — Pipeline Entry Point
  * 
- * Uses: parseSTSource() → AST → emitMEL() (IR walk, not regex)
+ * Pipeline stages wrapped in try/catch. On exception, produces a structured
+ * failure report rather than HTTP 500.
  */
 
 import { z } from "zod";
@@ -15,12 +16,24 @@ export interface Diagnostic {
   line: number;
 }
 
+export interface FailureReport {
+  stage: string;
+  error: string;
+  traceback: string;
+  sourceContext: string;
+  pipelineState: string;
+  timestamp: string;
+  direction: string;
+  inputLines: number;
+}
+
 export interface TranslationResult {
   ok: boolean;
   output: string;
   diagnostics: Diagnostic[];
   mappingYaml: string;
   labelsCsv: string;
+  failureReport: FailureReport | null;
   stats: {
     inputLines: number;
     outputLines: number;
@@ -28,6 +41,55 @@ export interface TranslationResult {
     manualPortCount: number;
     translatedNodes: number;
   };
+}
+
+function buildSourceContext(source: string, errorLine: number): string {
+  const lines = source.split("\n");
+  const start = Math.max(0, errorLine - 4);
+  const end = Math.min(lines.length, errorLine + 3);
+  const contextLines: string[] = [];
+  for (let i = start; i < end; i++) {
+    const lineNum = (i + 1).toString().padStart(4, " ");
+    const prefix = (i + 1 === errorLine) ? ">>>" : "   ";
+    contextLines.push(`${prefix} ${lineNum} | ${lines[i]}`);
+  }
+  return contextLines.join("\n");
+}
+
+function extractErrorLine(error: Error, source: string): number {
+  // Try to extract line number from error message
+  const lineMatch = error.message.match(/line (\d+)/i);
+  if (lineMatch) return parseInt(lineMatch[1]);
+  // Try stack trace for position info
+  const posMatch = error.message.match(/position (\d+)/i);
+  if (posMatch) {
+    const pos = parseInt(posMatch[1]);
+    const upToPos = source.substring(0, pos);
+    return (upToPos.match(/\n/g) || []).length + 1;
+  }
+  return 1;
+}
+
+function formatFailureReport(report: FailureReport): string {
+  return `=== FAILURE REPORT ===
+timestamp: ${report.timestamp}
+direction: ${report.direction}
+stage: ${report.stage}
+input_lines: ${report.inputLines}
+
+--- ERROR ---
+${report.error}
+
+--- TRACEBACK ---
+${report.traceback}
+
+--- SOURCE CONTEXT ---
+${report.sourceContext}
+
+--- PIPELINE STATE ---
+${report.pipelineState}
+
+=== END REPORT ===`;
 }
 
 export function translate(
@@ -39,20 +101,73 @@ export function translate(
   const sourceLines = source.split("\n");
   const inputLines = sourceLines.length;
   const sourceFile = "<input>";
+  const timestamp = new Date().toISOString();
 
+  // Pipeline state tracking
+  let currentStage = "init";
+  let ast: any = null;
+
+  // === Stage: parse ===
+  currentStage = "parser";
   try {
-    // Parse source into AST
-    const ast = parseSTSource(source);
+    ast = parseSTSource(source);
+  } catch (err: any) {
+    const errorLine = extractErrorLine(err, source);
+    const report: FailureReport = {
+      stage: "parser",
+      error: err.message,
+      traceback: err.stack || err.message,
+      sourceContext: buildSourceContext(source, errorLine),
+      pipelineState: "AST: not produced (parse failed)",
+      timestamp,
+      direction,
+      inputLines,
+    };
+    diagnostics.push({
+      severity: "ERROR",
+      code: "AB_MEL_PARSE_001",
+      message: `Parse error at line ${errorLine}: ${err.message}`,
+      line: errorLine,
+    });
+    return {
+      ok: false,
+      output: "",
+      diagnostics,
+      mappingYaml: "allocations: {}\n",
+      labelsCsv: "Class,Label,DataType,Device,Comment",
+      failureReport: report,
+      stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
+    };
+  }
 
+  // === Stage: emit (includes cst_to_ir, typecheck, lower_*, allocate_memory, emit_mel/emit_ab) ===
+  currentStage = direction === "ab2mel" ? "emit_mel" : "emit_ab";
+  try {
     if (direction === "ab2mel") {
-      // Walk AST and emit MEL
       const result = emitMEL(ast, sourceFile, sourceLines);
+      // Check for ERROR diagnostics
+      const hasErrors = result.diagnostics.some(d => d.severity === "ERROR");
+      let failureReport: FailureReport | null = null;
+      if (hasErrors) {
+        const firstError = result.diagnostics.find(d => d.severity === "ERROR")!;
+        failureReport = {
+          stage: "emit_mel",
+          error: firstError.message,
+          traceback: `Diagnostic ERROR at line ${firstError.line}: ${firstError.code}`,
+          sourceContext: buildSourceContext(source, firstError.line),
+          pipelineState: `AST: ${ast.length} top-level nodes produced\nEmit: partial output (${result.output.split("\n").length} lines before error)`,
+          timestamp,
+          direction,
+          inputLines,
+        };
+      }
       return {
-        ok: !result.diagnostics.some(d => d.severity === "ERROR"),
+        ok: !hasErrors,
         output: result.output,
         diagnostics: result.diagnostics,
         mappingYaml: result.mappingYaml,
         labelsCsv: result.labelsCsv,
+        failureReport,
         stats: {
           inputLines,
           outputLines: result.output.split("\n").length,
@@ -62,11 +177,10 @@ export function translate(
         },
       };
     } else {
-      // MEL → AB: for now, emit with AB-style member names
-      // TODO: full MEL→AB emitter (reverse of emitMEL)
+      // MEL → AB
       const result = emitMEL(ast, sourceFile, sourceLines);
-      // Post-process: reverse the member rewrites
       let output = result.output;
+      // Post-process: reverse member rewrites for AB output
       output = output.replace(/\.Q\b/g, ".DN");
       output = output.replace(/\.PT\b/g, ".PRE");
       output = output.replace(/\.ET\b/g, ".ACC");
@@ -76,12 +190,14 @@ export function translate(
       output = output.replace(/EXPT\((\w+),\s*(\w+)\)/g, "$1 ** $2");
       output = output.replace(/\[AB→MEL\]/g, "[MEL→AB]");
 
+      const hasErrors = result.diagnostics.some(d => d.severity === "ERROR");
       return {
-        ok: !result.diagnostics.some(d => d.severity === "ERROR"),
+        ok: !hasErrors,
         output,
         diagnostics: result.diagnostics,
         mappingYaml: result.mappingYaml,
         labelsCsv: result.labelsCsv,
+        failureReport: null,
         stats: {
           inputLines,
           outputLines: output.split("\n").length,
@@ -92,11 +208,22 @@ export function translate(
       };
     }
   } catch (err: any) {
+    const errorLine = extractErrorLine(err, source);
+    const report: FailureReport = {
+      stage: currentStage,
+      error: err.message,
+      traceback: err.stack || err.message,
+      sourceContext: buildSourceContext(source, errorLine),
+      pipelineState: `AST: ${ast ? ast.length + " top-level nodes" : "null"}\nStage failed: ${currentStage}`,
+      timestamp,
+      direction,
+      inputLines,
+    };
     diagnostics.push({
       severity: "ERROR",
-      code: "AB_MEL_PARSE_001",
-      message: `Parse error: ${err.message}`,
-      line: 0,
+      code: "AB_MEL_EMIT_ERR",
+      message: `${currentStage} failed: ${err.message}`,
+      line: errorLine,
     });
     return {
       ok: false,
@@ -104,10 +231,14 @@ export function translate(
       diagnostics,
       mappingYaml: "allocations: {}\n",
       labelsCsv: "Class,Label,DataType,Device,Comment",
+      failureReport: report,
       stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
     };
   }
 }
+
+// Export the formatter for use in the UI
+export { formatFailureReport };
 
 export const translateInputSchema = z.object({
   direction: z.enum(["ab2mel", "mel2ab"]),

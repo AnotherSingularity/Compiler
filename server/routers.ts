@@ -19,16 +19,17 @@ export const appRouter = router({
     }),
   }),
 
-  // Translation API (requires auth)
-  translate: protectedProcedure
+  // Translation API
+  translate: publicProcedure
     .input(translateInputSchema)
     .mutation(async ({ input, ctx }) => {
       const result = translate(input.source, input.direction, input.options);
 
-      // Save to database
+      // Save to database if authenticated
+      const userId = ctx.user?.id || 0;
       const sourceHash = crypto.createHash("sha256").update(input.source).digest("hex").slice(0, 64);
       const translationId = await db.createTranslation({
-        userId: ctx.user.id,
+        userId,
         direction: input.direction,
         sourceHash,
         sourceSizeBytes: Buffer.byteLength(input.source, "utf8"),

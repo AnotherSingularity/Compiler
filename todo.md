@@ -45,3 +45,7 @@
 - [x] v0.1.2: Validation layer — opt-in, post-hoc, platform LLM
 - [x] v0.1.2: Validation tab in output UI
 - [x] v0.1.2: Free tier limit (5 validations/month)
+- [x] Add Failures tab (5th tab, hidden when no errors)
+- [x] Wrap pipeline stages in try/catch with stage name + traceback capture
+- [x] Structured failure report with source context (±3 lines, >>> prefix)
+- [x] Copy failure report link (gold, secondary-action style)

@@ -27,6 +27,7 @@ interface TranslationResult {
   diagnostics: Array<{ severity: string; code: string; message: string; line: number }>;
   mappingYaml: string;
   labelsCsv: string;
+  failureReport?: { stage: string; error: string; traceback: string; sourceContext: string; pipelineState: string; timestamp: string; direction: string; inputLines: number } | null;
   stats: { inputLines: number; outputLines: number; warningCount: number; manualPortCount: number; translatedNodes: number };
 }
 
@@ -315,6 +316,46 @@ export default function TranslateScreen() {
                     {validation.message || "Validation failed"}
                   </Text>
                 )}
+              </View>
+            )}
+
+            {/* Failures Tab (visible only when errors/exceptions occurred) */}
+            {result.failureReport && (
+              <View style={{ marginTop: 24 }}>
+                <Text style={s.sectionHead}>Failures</Text>
+                <View style={s.hairline} />
+                <TouchableOpacity
+                  onPress={() => {
+                    const report = `=== FAILURE REPORT ===\ntimestamp: ${result.failureReport!.timestamp}\ndirection: ${result.failureReport!.direction}\nstage: ${result.failureReport!.stage}\ninput_lines: ${result.failureReport!.inputLines}\n\n--- ERROR ---\n${result.failureReport!.error}\n\n--- TRACEBACK ---\n${result.failureReport!.traceback}\n\n--- SOURCE CONTEXT ---\n${result.failureReport!.sourceContext}\n\n--- PIPELINE STATE ---\n${result.failureReport!.pipelineState}\n\n=== END REPORT ===`;
+                    Clipboard.setStringAsync(report);
+                  }}
+                  style={{ marginTop: 8, marginBottom: 12 }}
+                >
+                  <Text style={s.actionLink}>Copy failure report</Text>
+                </TouchableOpacity>
+                <ScrollView style={s.outputScroll} nestedScrollEnabled>
+                  <Text style={s.codeOutput} selectable>
+{`=== FAILURE REPORT ===
+timestamp: ${result.failureReport.timestamp}
+direction: ${result.failureReport.direction}
+stage: ${result.failureReport.stage}
+input_lines: ${result.failureReport.inputLines}
+
+--- ERROR ---
+${result.failureReport.error}
+
+--- TRACEBACK ---
+${result.failureReport.traceback}
+
+--- SOURCE CONTEXT ---
+${result.failureReport.sourceContext}
+
+--- PIPELINE STATE ---
+${result.failureReport.pipelineState}
+
+=== END REPORT ===`}
+                  </Text>
+                </ScrollView>
               </View>
             )}
           </View>
