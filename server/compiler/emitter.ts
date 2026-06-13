@@ -1,32 +1,115 @@
 /**
- * MEL Emitter — walks AST nodes and produces GX Works2 Structured Text.
- * Also handles: untranslatable detection, provenance, memory allocation, member rewriting.
+ * MEL Emitter — walks AST and produces GX Works2 Structured Text.
+ *
+ * Responsibilities:
+ *   1. Translate Allen-Bradley instruction syntax to Mitsubishi where there
+ *      is a direct equivalent (MOV → :=, COP → BMOV, LIM → LIMIT, etc.).
+ *   2. Identify untranslatable AB instructions (PID, PIDE, MSG, motion, JSR
+ *      labels) and emit MANUAL_PORT diagnostics with structured comments.
+ *   3. Rewrite AB timer/counter member access (.DN → .Q, .PRE → .PT) for
+ *      reads, and emit MEL FB-invoke form for TON/TOF/TONR/CTU calls with
+ *      honest placeholder comments where the AB rung context is lost.
+ *   4. Preserve bit-of-word syntax (X.N := bool, X.N as read) directly —
+ *      GX Works2 supports this natively, no BTEST/BSET wrapper needed.
+ *   5. Allocate Mitsubishi device addresses (M/D/T/C) for declared vars.
  */
 
-import type { ASTNode, VarBlockNode, VarDeclNode, CallNode, FBInvokeNode, AssignNode, IfNode, CaseNode, ForNode, WhileNode, RepeatNode, BinaryOpNode, UnaryOpNode, CompareNode, LogicalNode, IdentNode, LiteralNode, MemberAccessNode, BitAccessNode, IndexNode, FunctionCallNode, TypeCastNode, CommentNode } from "./parser";
+import type {
+  ASTNode,
+  VarBlockNode,
+  VarDeclNode,
+  CallNode,
+  FBInvokeNode,
+  AssignNode,
+  IfNode,
+  CaseNode,
+  ForNode,
+  WhileNode,
+  RepeatNode,
+  BinaryOpNode,
+  UnaryOpNode,
+  CompareNode,
+  LogicalNode,
+  IdentNode,
+  LiteralNode,
+  MemberAccessNode,
+  BitAccessNode,
+  IndexNode,
+  FunctionCallNode,
+  TypeCastNode,
+  CommentNode,
+} from "./parser";
 import type { Diagnostic } from "../translate";
 
-// Untranslatable calls — matched against FunctionCall/Call AST nodes
+// ─── Untranslatable AB instructions ───────────────────────────────────────
+
 const UNTRANSLATABLE: Record<string, { code: string; message: string }> = {
-  PID: { code: "AB_MEL_PID_001", message: "PID/PIDE block requires manual port. Configure Mitsubishi PID loop manually." },
-  PIDE: { code: "AB_MEL_PID_001", message: "PIDE block requires manual port." },
-  MSG: { code: "AB_MEL_MSG_001", message: "MSG (CIP) — consider SLMP or CC-Link IE Field." },
-  MAOC: { code: "AB_MEL_MOTION_001", message: "Motion instruction requires Mitsubishi positioning module." },
-  MAM: { code: "AB_MEL_MOTION_001", message: "Motion instruction requires Mitsubishi positioning module." },
-  MAJ: { code: "AB_MEL_MOTION_001", message: "Motion instruction requires Mitsubishi positioning module." },
-  MSO: { code: "AB_MEL_MOTION_001", message: "Motion instruction requires Mitsubishi positioning module." },
-  MAFR: { code: "AB_MEL_MOTION_001", message: "Motion instruction requires Mitsubishi positioning module." },
+  PID:  { code: "AB_MEL_PID_001",    message: "PID block requires manual port. Configure Mitsubishi PID loop (S(P).PID, QnUDV PID FB, or Process CPU PID instruction)." },
+  PIDE: { code: "AB_MEL_PID_001",    message: "PIDE block requires manual port. Mitsubishi has no direct PIDE equivalent — split into Mitsubishi PID instructions or use Process CPU FBs." },
+  MSG:  { code: "AB_MEL_MSG_001",    message: "MSG (CIP message) — replace with SLMP frame, CC-Link IE Field client, or Ethernet/IP scanner instruction." },
+  MAOC: { code: "AB_MEL_MOTION_001", message: "Motion output cam — requires Mitsubishi Simple Motion / MR-J5 setup." },
+  MAM:  { code: "AB_MEL_MOTION_001", message: "Motion Absolute Move — requires Mitsubishi positioning module / QD75 / Simple Motion." },
+  MAJ:  { code: "AB_MEL_MOTION_001", message: "Motion Axis Jog — requires Mitsubishi positioning module." },
+  MSO:  { code: "AB_MEL_MOTION_001", message: "Motion Servo On — requires Mitsubishi positioning module." },
+  MAFR: { code: "AB_MEL_MOTION_001", message: "Motion Axis Fault Reset — requires Mitsubishi positioning module." },
+  JSR:  { code: "AB_MEL_FLOW_001",   message: "JSR (jump to subroutine) — convert to function call: SubroutineName();" },
+  LBL:  { code: "AB_MEL_FLOW_002",   message: "LBL (label) — MEL discourages labels in ST. Restructure with IF/CASE/loop." },
+  JMP:  { code: "AB_MEL_FLOW_002",   message: "JMP (jump) — MEL discourages goto/jmp in ST. Restructure control flow." },
+  TND:  { code: "AB_MEL_FLOW_003",   message: "TND (temporary end) — MEL has no equivalent; use RETURN inside a function block." },
+  SBR:  { code: "AB_MEL_FLOW_004",   message: "SBR (subroutine define) — express as MEL FUNCTION_BLOCK or FUNCTION." },
+  RET:  { code: "AB_MEL_FLOW_005",   message: "RET (subroutine return) — use MEL RETURN keyword." },
 };
 
-const PID_PARAMS = ["SP", "PV", "OUT", "Kp", "Ki", "Kd", "MAXO", "MINO", "DB", "SWM", "SO", "ERR", "BIAS"];
+const PID_PARAMS = [
+  "SP", "SPHLimit", "SPLLimit", "SPProg", "SPOper",
+  "PV", "PVHigh", "PVLow",
+  "OUT", "OUTHLim", "OUTLLim", "CVHLimit", "CVLLimit",
+  "Kp", "Ki", "Kd", "TI", "TD",
+  "DB", "SWM", "SO", "MAXO", "MINO", "BIAS", "ERR", "UPD",
+];
 
-// Timer member map AB→MEL
-const TIMER_MEMBERS: Record<string, string> = { DN: "Q", TT: "Q", PRE: "PT", ACC: "ET", EN: "EN" };
-const COUNTER_MEMBERS: Record<string, string> = { DN: "Q", PRE: "PV", ACC: "CV", CU: "CU", CD: "CD" };
+const TIMER_MEMBERS: Record<string, string> = {
+  DN: "Q",
+  PRE: "PT",
+  ACC: "ET",
+  EN: "EN",
+};
+const COUNTER_MEMBERS: Record<string, string> = {
+  DN: "Q",
+  PRE: "PV",
+  ACC: "CV",
+  CU: "CU",
+  CD: "CD",
+};
 
-// Memory allocator
+const INSTRUCTION_REWRITES: Record<string, (args: ASTNode[], emit: (n: ASTNode) => string) => string> = {
+  MOV:  (args, e) => args.length >= 2 ? `${e(args[1])} := ${e(args[0])}` : `MOV(${args.map(e).join(", ")})`,
+  CLR:  (args, e) => args.length >= 1 ? `${e(args[0])} := 0` : `CLR()`,
+  COP:  (args, e) => args.length >= 3 ? `BMOV(${e(args[0])}, ${e(args[1])}, ${e(args[2])})` : `BMOV(${args.map(e).join(", ")})`,
+  CPS:  (args, e) => args.length >= 3 ? `BMOV(${e(args[0])}, ${e(args[1])}, ${e(args[2])})` : `BMOV(${args.map(e).join(", ")})`,
+  FLL:  (args, e) => args.length >= 3 ? `FMOV(${e(args[0])}, ${e(args[1])}, ${e(args[2])})` : `FMOV(${args.map(e).join(", ")})`,
+  ABS:  (args, e) => `ABS(${args.map(e).join(", ")})`,
+  SQR:  (args, e) => `SQRT(${args.map(e).join(", ")})`,
+  SQRT: (args, e) => `SQRT(${args.map(e).join(", ")})`,
+  CPT:  (args, e) => args.length >= 2 ? `${e(args[0])} := ${e(args[1])}` : `CPT(${args.map(e).join(", ")})`,
+  LIM:  (args, e) => args.length >= 3 ? `LIMIT(${e(args[0])}, ${e(args[1])}, ${e(args[2])})` : `LIMIT(${args.map(e).join(", ")})`,
+  MEQ:  (args, e) => args.length >= 3 ? `((${e(args[0])} AND ${e(args[1])}) = ${e(args[2])})` : `MEQ(${args.map(e).join(", ")})`,
+  SIN:  (args, e) => `SIN(${args.map(e).join(", ")})`,
+  COS:  (args, e) => `COS(${args.map(e).join(", ")})`,
+  TAN:  (args, e) => `TAN(${args.map(e).join(", ")})`,
+  ASN:  (args, e) => `ASIN(${args.map(e).join(", ")})`,
+  ACS:  (args, e) => `ACOS(${args.map(e).join(", ")})`,
+  ATN:  (args, e) => `ATAN(${args.map(e).join(", ")})`,
+  LN:   (args, e) => `LN(${args.map(e).join(", ")})`,
+  LOG:  (args, e) => `LOG(${args.map(e).join(", ")})`,
+};
+
+// ─── Allocator ───────────────────────────────────────────────────────────
+
 class Allocator {
-  private ptrs: Record<string, number> = { M: 1000, D_INT: 5000, D_DINT: 1000, D_REAL: 9000, D_STR: 15000, T: 0, C: 0 };
+  private ptrs: Record<string, number> = {
+    M: 1000, D_INT: 5000, D_DINT: 1000, D_REAL: 9000, D_STR: 15000, T: 0, C: 0,
+  };
   allocs: Array<{ name: string; type: string; device: string }> = [];
 
   allocate(name: string, type: string): string {
@@ -45,6 +128,8 @@ class Allocator {
   }
 }
 
+// ─── Public API ──────────────────────────────────────────────────────────
+
 export interface EmitResult {
   output: string;
   diagnostics: Diagnostic[];
@@ -53,33 +138,44 @@ export interface EmitResult {
   labelsCsv: string;
 }
 
-export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[]): EmitResult {
+function escapeForComment(s: string): string {
+  return s.replace(/\*\)/g, "*\\)").replace(/\(\*/g, "(\\*");
+}
+
+export function emitMEL(
+  ast: ASTNode[],
+  sourceFile: string,
+  sourceLines: string[],
+): EmitResult {
   const diags: Diagnostic[] = [];
   const allocator = new Allocator();
   let translated = 0;
   const out: string[] = [];
-  // Track instances that triggered MANUAL_PORT (e.g., PID instances)
   const manualPortInstances = new Set<string>();
+  const seenManualPortRefs = new Set<string>();
 
-  // Extract base identifier from an AST node (for member access checks)
   function getBaseIdent(node: ASTNode): string {
     if (node.kind === "ident") return (node as IdentNode).name;
     if (node.kind === "member_access") return getBaseIdent((node as MemberAccessNode).object);
     if (node.kind === "index") return getBaseIdent((node as IndexNode).array);
+    if (node.kind === "bit_access") return getBaseIdent((node as BitAccessNode).object);
     return "";
   }
 
-  // === PRE-PASS: collect all manual-ported instances before emitting ===
-  // This ensures that member references appearing BEFORE or AFTER the call are caught.
+  function provenance(line: number): string {
+    // Line comments don't need block-comment escaping — // ends at newline.
+    const orig = sourceLines[line - 1]?.trim() || "";
+    return `// [AB→MEL] ${sourceFile}:${line} | ${orig}`;
+  }
+
+  // Pre-pass: collect every identifier that gets passed as the first arg to
+  // an untranslatable instruction. Subsequent member access on those names
+  // will be flagged and emitted with a manual-map placeholder.
   function collectManualPortInstances(nodes: ASTNode[]) {
     for (const node of nodes) {
-      if (node.kind === "call") {
-        const n = node as CallNode;
-        if (UNTRANSLATABLE[n.name] && n.args[0]?.kind === "ident") {
-          manualPortInstances.add((n.args[0] as IdentNode).name);
-        }
-      } else if (node.kind === "function_call") {
-        const n = node as FunctionCallNode;
+      if (!node) continue;
+      if (node.kind === "call" || node.kind === "function_call") {
+        const n = node as CallNode | FunctionCallNode;
         if (UNTRANSLATABLE[n.name] && n.args[0]?.kind === "ident") {
           manualPortInstances.add((n.args[0] as IdentNode).name);
         }
@@ -101,59 +197,86 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
       }
     }
   }
-  // Run the pre-pass on the full AST
   collectManualPortInstances(ast);
 
-  function provenance(line: number): string {
-    const orig = sourceLines[line - 1]?.trim() || "";
-    return `// [AB→MEL] src: ${sourceFile} line ${line} | orig: "${orig}"`;
-  }
+  // ── Expressions ───────────────────────────────────────────────────────
 
   function emitExpr(node: ASTNode): string {
     switch (node.kind) {
       case "ident": return (node as IdentNode).name;
       case "literal": return (node as LiteralNode).value;
+
       case "binary_op": {
         const n = node as BinaryOpNode;
         if (n.op === "**") return `EXPT(${emitExpr(n.left)}, ${emitExpr(n.right)})`;
         return `(${emitExpr(n.left)} ${n.op} ${emitExpr(n.right)})`;
       }
-      case "unary_op": { const n = node as UnaryOpNode; return `${n.op} ${emitExpr(n.operand)}`; }
-      case "compare": { const n = node as CompareNode; return `(${emitExpr(n.left)} ${n.op} ${emitExpr(n.right)})`; }
-      case "logical": { const n = node as LogicalNode; return `(${emitExpr(n.left)} ${n.op} ${emitExpr(n.right)})`; }
+      case "unary_op": {
+        const n = node as UnaryOpNode;
+        if (n.op === "-") return `-${emitExpr(n.operand)}`;
+        return `${n.op} ${emitExpr(n.operand)}`;
+      }
+      case "compare": {
+        const n = node as CompareNode;
+        return `(${emitExpr(n.left)} ${n.op} ${emitExpr(n.right)})`;
+      }
+      case "logical": {
+        const n = node as LogicalNode;
+        return `(${emitExpr(n.left)} ${n.op} ${emitExpr(n.right)})`;
+      }
+
       case "member_access": {
         const n = node as MemberAccessNode;
-        const obj = emitExpr(n.object);
         const baseIdent = getBaseIdent(n.object);
-        // If this references a MANUAL_PORT instance, flag it
         if (manualPortInstances.has(baseIdent)) {
-          // Emit diagnostic for this reference
-          diags.push({ severity: "MANUAL_PORT", code: "AB_MEL_PID_002", message: `Reference to manual-ported instance: ${baseIdent}.${n.member} — no MEL equivalent`, line: n.line });
-          // Return a placeholder variable name that the engineer must replace
-          return `${baseIdent}_${n.member} (* NEEDS_MANUAL_MAP *)`;
+          const refKey = `${baseIdent}.${n.member}`;
+          if (!seenManualPortRefs.has(refKey)) {
+            seenManualPortRefs.add(refKey);
+            diags.push({
+              severity: "MANUAL_PORT",
+              code: "AB_MEL_PID_002",
+              message: `Reference to manual-ported instance member: ${refKey} — no direct MEL mapping`,
+              line: n.line,
+            });
+          }
+          // Placeholder identifier — keep it as a single valid identifier so
+          // downstream tools don't choke. The "_MANUAL" suffix flags it.
+          return `${baseIdent}_${n.member}_MANUAL`;
         }
-        // Rewrite timer/counter members
+        const obj = emitExpr(n.object);
         const melMember = TIMER_MEMBERS[n.member] || COUNTER_MEMBERS[n.member] || n.member;
         return `${obj}.${melMember}`;
       }
+
       case "bit_access": {
+        // GX Works2 supports direct .N bit-of-word syntax natively.
         const n = node as BitAccessNode;
-        return `BTEST(${emitExpr(n.object)}, ${n.bit})`;
+        return `${emitExpr(n.object)}.${n.bit}`;
       }
+
       case "index": {
         const n = node as IndexNode;
         return `${emitExpr(n.array)}[${n.indices.map(emitExpr).join(", ")}]`;
       }
+
       case "function_call": {
         const n = node as FunctionCallNode;
-        // Type conversions: keep IEC standard names (DINT_TO_INT, REAL_TO_DINT, etc.)
-        // These are valid in GX Works2 — do NOT rewrite to bare type names
+        const rewrite = INSTRUCTION_REWRITES[n.name];
+        if (rewrite) return rewrite(n.args, emitExpr);
         return `${n.name}(${n.args.map(emitExpr).join(", ")})`;
       }
-      case "type_cast": { const n = node as TypeCastNode; return `${n.targetType}(${emitExpr(n.expr)})`; }
-      default: return "???";
+
+      case "type_cast": {
+        const n = node as TypeCastNode;
+        return `${n.targetType}(${emitExpr(n.expr)})`;
+      }
+
+      default:
+        return `(* UNSUPPORTED_EXPR_${node.kind} *)`;
     }
   }
+
+  // ── Statements ────────────────────────────────────────────────────────
 
   function emitStmts(stmts: ASTNode[], indent: string) {
     for (const stmt of stmts) emitStmt(stmt, indent);
@@ -162,10 +285,10 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
   function emitStmt(node: ASTNode, indent: string) {
     switch (node.kind) {
       case "comment": {
-        const n = node as CommentNode;
-        out.push(`${indent}${n.text}`);
+        out.push(`${indent}${(node as CommentNode).text}`);
         break;
       }
+
       case "var_block": {
         const n = node as VarBlockNode;
         out.push(`${indent}${n.scope}`);
@@ -179,119 +302,150 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
         out.push(`${indent}END_VAR`);
         break;
       }
+
       case "assign": {
         const n = node as AssignNode;
         out.push(`${indent}${provenance(n.line)}`);
-        // Check BOTH sides for manual-ported instance references FIRST
+
         const targetBase = getBaseIdent(n.target);
         if (manualPortInstances.has(targetBase)) {
-          // LHS is a manual-ported instance member — entire assignment is manual port
           const target = emitExpr(n.target);
           const value = emitExpr(n.value);
-          diags.push({ severity: "MANUAL_PORT", code: "AB_MEL_PID_002", message: `Assignment to manual-ported instance member: ${target}`, line: n.line });
-          out.push(`${indent}(* MANUAL PORT: ${target} := ${value} — instance has no MEL equivalent *)`);
+          diags.push({
+            severity: "MANUAL_PORT",
+            code: "AB_MEL_PID_002",
+            message: `Assignment to manual-ported instance member: ${target}`,
+            line: n.line,
+          });
+          // Emit as runnable code with the placeholder LHS, plus an inline
+          // comment naming the original AB member. This preserves the RHS
+          // operand in code form (so it survives round-tripping and shows up
+          // in symbol tables) instead of swallowing it inside a block
+          // comment.
+          out.push(`${indent}${target} := ${value};  (* MANUAL_PORT: original LHS was a member of manual-ported instance ${targetBase} *)`);
           translated++;
           break;
         }
+
+        // Plain assignment — bit-of-word writes (X.N := Y) emit unchanged.
         const target = emitExpr(n.target);
         const value = emitExpr(n.value);
-        // Bit-write: if target is BTEST, conditionally BSET/BRST based on RHS
-        if (target.startsWith("BTEST(")) {
-          const match = target.match(/BTEST\((.+),\s*(\d+)\)/);
-          if (match) {
-            const word = match[1];
-            const bit = match[2];
-            if (value === "1" || value === "TRUE") {
-              out.push(`${indent}BSET(TRUE, ${word}, ${bit});`);
-            } else if (value === "0" || value === "FALSE") {
-              out.push(`${indent}BRST(TRUE, ${word}, ${bit});`);
-            } else {
-              out.push(`${indent}IF ${value} THEN`);
-              out.push(`${indent}  BSET(TRUE, ${word}, ${bit});`);
-              out.push(`${indent}ELSE`);
-              out.push(`${indent}  BRST(TRUE, ${word}, ${bit});`);
-              out.push(`${indent}END_IF;`);
-            }
-            translated++;
-            break;
-          }
-        }
         out.push(`${indent}${target} := ${value};`);
         translated++;
         break;
       }
+
       case "call": {
         const n = node as CallNode;
-        // Check untranslatable
+
         if (UNTRANSLATABLE[n.name]) {
           const info = UNTRANSLATABLE[n.name];
-          diags.push({ severity: "MANUAL_PORT", code: info.code, message: info.message, line: n.line });
-          // Track the first arg as a manual-ported instance
+          diags.push({
+            severity: "MANUAL_PORT",
+            code: info.code,
+            message: info.message,
+            line: n.line,
+          });
           if (n.args[0] && n.args[0].kind === "ident") {
             manualPortInstances.add((n.args[0] as IdentNode).name);
           }
-          out.push(`${indent}(* MANUAL PORT REQUIRED: ${n.name} block from ${sourceFile}:${n.line}`);
-          out.push(`${indent}   Original call: ${sourceLines[n.line - 1]?.trim() || n.name + "(...)"}`);
-          out.push(`${indent}   ${info.message}`);
+          out.push(`${indent}(* MANUAL PORT REQUIRED: ${n.name} (${sourceFile}:${n.line})`);
+          out.push(`${indent}   original: ${escapeForComment(sourceLines[n.line - 1]?.trim() || `${n.name}(...)`)}`);
+          out.push(`${indent}   note: ${info.message}`);
           if (n.name === "PID" || n.name === "PIDE") {
-            out.push(`${indent}   Loop parameters to configure on Mitsubishi side:`);
             const inst = n.args[0] ? emitExpr(n.args[0]) : n.name;
+            out.push(`${indent}   loop parameters to configure on Mitsubishi side:`);
             for (const p of PID_PARAMS) out.push(`${indent}     ${inst}.${p}`);
           }
           out.push(`${indent}*)`);
           translated++;
           break;
         }
-        // Timer calls: TON(inst) → inst(IN := ..., PT := ...)
+
+        if (INSTRUCTION_REWRITES[n.name]) {
+          out.push(`${indent}${INSTRUCTION_REWRITES[n.name](n.args, emitExpr)};`);
+          translated++;
+          break;
+        }
+
+        // Timer: TON / TOF / RTO / TONR
         if (["TON", "TOF", "RTO", "TONR"].includes(n.name) && n.args.length === 1 && n.args[0].kind === "ident") {
           const inst = (n.args[0] as IdentNode).name;
-          out.push(`${indent}${provenance(n.line)}`);
-          out.push(`${indent}${inst}(IN := ${inst}_EN, PT := ${inst}_PT);`);
+          out.push(`${indent}(* AB call: ${n.name}(${inst}) — enable + preset come from rung context in AB *)`);
+          out.push(`${indent}${inst}(IN := TODO_${inst}_enable, PT := ${inst}.PT);`);
           if (n.name === "RTO" || n.name === "TONR") {
-            diags.push({ severity: "WARN", code: "AB_MEL_TIMER_001", message: `Retentive timer ${inst} — verify reset path.`, line: n.line });
+            diags.push({
+              severity: "WARN",
+              code: "AB_MEL_TIMER_001",
+              message: `Retentive timer ${inst} (${n.name}) — verify reset path is wired in MEL`,
+              line: n.line,
+            });
+          } else {
+            diags.push({
+              severity: "INFO",
+              code: "AB_MEL_TIMER_002",
+              message: `Timer ${inst} (${n.name}) — wire IN to the original AB rung condition (placeholder: TODO_${inst}_enable)`,
+              line: n.line,
+            });
           }
           translated++;
           break;
         }
-        // Counter calls
+
+        // Counter: CTU / CTD / CTUD
         if (["CTU", "CTD", "CTUD"].includes(n.name) && n.args.length === 1 && n.args[0].kind === "ident") {
           const inst = (n.args[0] as IdentNode).name;
-          out.push(`${indent}${provenance(n.line)}`);
-          if (n.name === "CTU") out.push(`${indent}${inst}(CU := ${inst}_CU, R := ${inst}_R, PV := ${inst}_PV);`);
-          else if (n.name === "CTD") out.push(`${indent}${inst}(CD := ${inst}_CD, LD := ${inst}_LD, PV := ${inst}_PV);`);
-          else out.push(`${indent}${inst}(CU := ${inst}_CU, CD := ${inst}_CD, R := ${inst}_R, PV := ${inst}_PV);`);
+          out.push(`${indent}(* AB call: ${n.name}(${inst}) — count + reset come from rung context in AB *)`);
+          if (n.name === "CTU") {
+            out.push(`${indent}${inst}(CU := TODO_${inst}_count_up, R := TODO_${inst}_reset, PV := ${inst}.PV);`);
+          } else if (n.name === "CTD") {
+            out.push(`${indent}${inst}(CD := TODO_${inst}_count_down, LD := TODO_${inst}_load, PV := ${inst}.PV);`);
+          } else {
+            out.push(`${indent}${inst}(CU := TODO_${inst}_count_up, CD := TODO_${inst}_count_down, R := TODO_${inst}_reset, PV := ${inst}.PV);`);
+          }
+          diags.push({
+            severity: "INFO",
+            code: "AB_MEL_COUNTER_001",
+            message: `Counter ${inst} (${n.name}) — wire inputs to original AB rung conditions (placeholders: TODO_${inst}_*)`,
+            line: n.line,
+          });
           translated++;
           break;
         }
-        // Generic call
-        out.push(`${indent}${provenance(n.line)}`);
+
+        // Unknown call — pass through
         out.push(`${indent}${n.name}(${n.args.map(emitExpr).join(", ")});`);
         translated++;
         break;
       }
+
       case "function_call": {
         const n = node as FunctionCallNode;
-        // Same untranslatable check
         if (UNTRANSLATABLE[n.name]) {
           const info = UNTRANSLATABLE[n.name];
-          diags.push({ severity: "MANUAL_PORT", code: info.code, message: info.message, line: n.line });
-          out.push(`${indent}(* MANUAL PORT REQUIRED: ${n.name} block from ${sourceFile}:${n.line}`);
-          out.push(`${indent}   Original call: ${sourceLines[n.line - 1]?.trim() || ""}`);
-          out.push(`${indent}   ${info.message}`);
-          if (n.name === "PID" || n.name === "PIDE") {
-            out.push(`${indent}   Loop parameters to configure on Mitsubishi side:`);
-            const inst = n.args[0] ? emitExpr(n.args[0]) : n.name;
-            for (const p of PID_PARAMS) out.push(`${indent}     ${inst}.${p}`);
-          }
+          diags.push({
+            severity: "MANUAL_PORT",
+            code: info.code,
+            message: info.message,
+            line: n.line,
+          });
+          out.push(`${indent}(* MANUAL PORT REQUIRED: ${n.name} (${sourceFile}:${n.line})`);
+          out.push(`${indent}   original: ${escapeForComment(sourceLines[n.line - 1]?.trim() || "")}`);
+          out.push(`${indent}   note: ${info.message}`);
           out.push(`${indent}*)`);
           translated++;
           break;
         }
-        out.push(`${indent}${provenance(n.line)}`);
+        if (INSTRUCTION_REWRITES[n.name]) {
+          out.push(`${indent}${INSTRUCTION_REWRITES[n.name](n.args, emitExpr)};`);
+          translated++;
+          break;
+        }
         out.push(`${indent}${n.name}(${n.args.map(emitExpr).join(", ")});`);
         translated++;
         break;
       }
+
       case "if": {
         const n = node as IfNode;
         out.push(`${indent}${provenance(n.line)}`);
@@ -301,11 +455,15 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
           out.push(`${indent}ELSIF ${emitExpr(elif.condition)} THEN`);
           emitStmts(elif.block, indent + "  ");
         }
-        if (n.elseBlock) { out.push(`${indent}ELSE`); emitStmts(n.elseBlock, indent + "  "); }
+        if (n.elseBlock) {
+          out.push(`${indent}ELSE`);
+          emitStmts(n.elseBlock, indent + "  ");
+        }
         out.push(`${indent}END_IF;`);
         translated++;
         break;
       }
+
       case "case": {
         const n = node as CaseNode;
         out.push(`${indent}${provenance(n.line)}`);
@@ -314,11 +472,15 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
           out.push(`${indent}  ${br.labels.map(emitExpr).join(", ")}:`);
           emitStmts(br.block, indent + "    ");
         }
-        if (n.elseBlock) { out.push(`${indent}ELSE`); emitStmts(n.elseBlock, indent + "  "); }
+        if (n.elseBlock) {
+          out.push(`${indent}ELSE`);
+          emitStmts(n.elseBlock, indent + "  ");
+        }
         out.push(`${indent}END_CASE;`);
         translated++;
         break;
       }
+
       case "for": {
         const n = node as ForNode;
         out.push(`${indent}${provenance(n.line)}`);
@@ -329,6 +491,7 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
         translated++;
         break;
       }
+
       case "while": {
         const n = node as WhileNode;
         out.push(`${indent}${provenance(n.line)}`);
@@ -338,6 +501,7 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
         translated++;
         break;
       }
+
       case "repeat": {
         const n = node as RepeatNode;
         out.push(`${indent}${provenance(n.line)}`);
@@ -347,7 +511,8 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
         translated++;
         break;
       }
-      case "exit": { out.push(`${indent}EXIT;`); translated++; break; }
+
+      case "exit":   { out.push(`${indent}EXIT;`);   translated++; break; }
       case "return": { out.push(`${indent}RETURN;`); translated++; break; }
       default: break;
     }
@@ -355,16 +520,29 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
 
   emitStmts(ast, "");
 
-  // Build mapping
+  // ── Outputs ───────────────────────────────────────────────────────────
+
   let mappingYaml = "allocations: {}\n";
   let labelsCsv = "Class,Label,DataType,Device,Comment";
   if (allocator.allocs.length) {
-    mappingYaml = "allocations:\n" + allocator.allocs.map(a => `  ${a.name}:\n    device: ${a.device}\n    type: ${a.type}`).join("\n") + "\n";
-    labelsCsv = "Class,Label,DataType,Device,Comment\n" + allocator.allocs.map(a => `VAR_GLOBAL,${a.name},${a.type},${a.device},`).join("\n");
+    mappingYaml =
+      "allocations:\n" +
+      allocator.allocs
+        .map((a) => `  ${a.name}:\n    device: ${a.device}\n    type: ${a.type}`)
+        .join("\n") +
+      "\n";
+    labelsCsv =
+      "Class,Label,DataType,Device,Comment\n" +
+      allocator.allocs.map((a) => `VAR_GLOBAL,${a.name},${a.type},${a.device},`).join("\n");
   }
 
   if (translated === 0) {
-    diags.push({ severity: "WARN", code: "AB_MEL_PIPELINE_001", message: "Pipeline produced no translated nodes.", line: 0 });
+    diags.push({
+      severity: "WARN",
+      code: "AB_MEL_PIPELINE_001",
+      message: "Pipeline produced no translated nodes.",
+      line: 0,
+    });
   }
 
   return { output: out.join("\n"), diagnostics: diags, translatedNodes: translated, mappingYaml, labelsCsv };

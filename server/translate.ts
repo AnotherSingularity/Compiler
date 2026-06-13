@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { parseSTSource } from "./compiler/parser";
 import { emitMEL } from "./compiler/emitter";
+import { emitAB } from "./compiler/emitter-ab";
 
 export interface Diagnostic {
   severity: "INFO" | "WARN" | "MANUAL_PORT" | "ERROR";
@@ -191,30 +192,33 @@ export function translate(
         },
       };
     } else {
-      // MEL → AB
-      const result = emitMEL(ast, sourceFile, sourceLines);
-      let output = result.output;
-      // Post-process: reverse member rewrites for AB output
-      output = output.replace(/\.Q\b/g, ".DN");
-      output = output.replace(/\.PT\b/g, ".PRE");
-      output = output.replace(/\.ET\b/g, ".ACC");
-      output = output.replace(/\.PV\b/g, ".PRE");
-      output = output.replace(/\.CV\b/g, ".ACC");
-      output = output.replace(/BTEST\((\w+),\s*(\d+)\)/g, "$1.$2");
-      output = output.replace(/EXPT\((\w+),\s*(\w+)\)/g, "$1 ** $2");
-      output = output.replace(/\[AB→MEL\]/g, "[MEL→AB]");
-
+      // MEL → AB via real emitter (was previously string regex replacement).
+      const result = emitAB(ast, sourceFile, sourceLines);
       const hasErrors = result.diagnostics.some(d => d.severity === "ERROR");
+      let failureReport: FailureReport | null = null;
+      if (result.translatedNodes === 0 && inputLines > 1 && !hasErrors) {
+        failureReport = {
+          stage: "emit_ab",
+          error: "Pipeline produced 0 translated nodes for non-empty input. Parser may not recognize this input format.",
+          traceback: "No exception — translatedNodes counter is 0",
+          sourceContext: buildSourceContext(source, 1),
+          pipelineState: `AST: ${ast.length} top-level nodes\ntranslatedNodes: 0\noutputLines: ${result.output.split("\n").length}`,
+          timestamp,
+          direction,
+          inputLines,
+        };
+        result.diagnostics.push({ severity: "ERROR", code: "MEL_AB_PIPELINE_002", message: "No nodes translated. Input may not be Structured Text.", line: 0 });
+      }
       return {
-        ok: !hasErrors,
-        output,
+        ok: !hasErrors && !failureReport,
+        output: result.output,
         diagnostics: result.diagnostics,
         mappingYaml: result.mappingYaml,
         labelsCsv: result.labelsCsv,
-        failureReport: null,
+        failureReport,
         stats: {
           inputLines,
-          outputLines: output.split("\n").length,
+          outputLines: result.output.split("\n").length,
           warningCount: result.diagnostics.filter(d => d.severity === "WARN").length,
           manualPortCount: result.diagnostics.filter(d => d.severity === "MANUAL_PORT").length,
           translatedNodes: result.translatedNodes,

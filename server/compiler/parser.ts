@@ -293,12 +293,39 @@ export class Parser {
   private parseVarDecl(): VarDeclNode | null {
     if (!this.match("IDENT")) return null;
     const name = this.advance();
+
+    // Optional IEC 61131-3 direct-address clause:  IDENT AT %IX0.0 : ...
+    // Mitsubishi GX Works2 uses bare device names without the % prefix:
+    // IDENT AT M1000 : ...   IDENT AT D5000 : ...
+    let directAddress: string | null = null;
+    if (this.peek().type === "IDENT" && this.peek().value.toUpperCase() === "AT") {
+      this.advance(); // consume AT
+      const addrParts: string[] = [];
+      // %IX0.0 style: percent, ident, optional dotted bit
+      // M1000 style: ident
+      // Read everything up to ':'
+      while (!this.match("COLON", "EOF")) {
+        addrParts.push(this.advance().value);
+      }
+      directAddress = addrParts.join("");
+    }
+
     this.expect("COLON");
     // Type can be complex: ARRAY[0..10] OF DINT, STRING[80], etc.
-    let typeName = "";
+    // The tokenizer ate whitespace, so re-insert a space before any token
+    // that starts with a letter (the only case where adjacency would mash
+    // identifiers/keywords together — punctuation runs like ARRAY[0..9]
+    // are fine without spaces).
+    const typeParts: string[] = [];
     while (!this.match("SEMI", "ASSIGN", "EOF")) {
-      typeName += this.advance().value;
+      const tok = this.advance();
+      const firstCh = tok.value.charAt(0);
+      if (typeParts.length > 0 && /[A-Za-z_]/.test(firstCh)) {
+        typeParts.push(" ");
+      }
+      typeParts.push(tok.value);
     }
+    const typeName = typeParts.join("");
     let initial: ASTNode | null = null;
     if (this.consume("ASSIGN")) {
       initial = this.parseExpression();
