@@ -106,9 +106,46 @@ export default function TranslateScreen() {
       const res = await translateMutation.mutateAsync({ direction, source: sourceCode });
       setResult(res);
       if ((res as any).translationId) setTranslationId((res as any).translationId);
+      // Check for empty output with non-empty input (pipeline failure)
+      if (res.ok && (!res.output || res.output.trim() === "") && sourceCode.trim()) {
+        setResult({
+          ...res,
+          ok: false,
+          failureReport: {
+            stage: "emit_mel",
+            error: "Pipeline produced empty output for non-empty input",
+            traceback: "No exception — output was empty string",
+            sourceContext: sourceCode.substring(0, 200),
+            pipelineState: `translatedNodes: ${res.stats.translatedNodes}`,
+            timestamp: new Date().toISOString(),
+            direction,
+            inputLines: res.stats.inputLines,
+          },
+        });
+      }
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
     } catch (error: any) {
-      Alert.alert("Error", error?.message || "Translation failed.");
+      // HTTP error or network failure — produce a failure report, not just an alert
+      const failureReport = {
+        stage: "route_handler" as const,
+        error: error?.message || "Unknown error",
+        traceback: error?.data?.stack || error?.stack || error?.message || "No traceback available",
+        sourceContext: sourceCode.substring(0, 200),
+        pipelineState: "Request failed before pipeline could execute",
+        timestamp: new Date().toISOString(),
+        direction,
+        inputLines: sourceCode.split("\n").length,
+      };
+      setResult({
+        ok: false,
+        output: "",
+        diagnostics: [{ severity: "ERROR", code: "HTTP_ERROR", message: error?.message || "Request failed", line: 0 }],
+        mappingYaml: "",
+        labelsCsv: "",
+        failureReport,
+        stats: { inputLines: sourceCode.split("\n").length, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
+      });
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
     } finally { setIsTranslating(false); }
   }, [sourceCode, direction, translateMutation]);
 
@@ -320,13 +357,15 @@ export default function TranslateScreen() {
             )}
 
             {/* Failures Tab (visible only when errors/exceptions occurred) */}
-            {result.failureReport && (
+            {(result.failureReport || result.diagnostics.some(d => d.severity === "ERROR") || (!result.ok && !result.output)) && (
               <View style={{ marginTop: 24 }}>
                 <Text style={s.sectionHead}>Failures</Text>
                 <View style={s.hairline} />
                 <TouchableOpacity
                   onPress={() => {
-                    const report = `=== FAILURE REPORT ===\ntimestamp: ${result.failureReport!.timestamp}\ndirection: ${result.failureReport!.direction}\nstage: ${result.failureReport!.stage}\ninput_lines: ${result.failureReport!.inputLines}\n\n--- ERROR ---\n${result.failureReport!.error}\n\n--- TRACEBACK ---\n${result.failureReport!.traceback}\n\n--- SOURCE CONTEXT ---\n${result.failureReport!.sourceContext}\n\n--- PIPELINE STATE ---\n${result.failureReport!.pipelineState}\n\n=== END REPORT ===`;
+                    const fr = result.failureReport;
+                    const sourceKind = pickedFile?.name?.endsWith(".L5X") ? "l5x_base64" : pickedFile?.name?.endsWith(".l5k") ? "l5k_text" : "st_text";
+                    const report = `=== FAILURE REPORT ===\ntimestamp: ${fr?.timestamp || new Date().toISOString()}\ndirection: ${direction}\nsource_kind: ${sourceKind}\nstage: ${fr?.stage || "unknown"}\ninput_lines: ${fr?.inputLines || result.stats.inputLines}\n\n--- ERROR ---\n${fr?.error || result.diagnostics.filter(d => d.severity === "ERROR").map(d => `[${d.code}] ${d.message}`).join("\n") || "Unknown error"}\n\n--- TRACEBACK ---\n${fr?.traceback || "No traceback (diagnostic-level error, not exception)"}\n\n--- INPUT (first 200 chars) ---\n${sourceCode.substring(0, 200)}\n\n--- COUNTERS ---\nroutines_discovered: ${result.stats.inputLines}\nroutines_emitted: ${result.stats.translatedNodes}\nlast_successful_stage: ${fr ? (fr.stage === "parser" ? "init" : "parser") : "emit"}\n\n--- SOURCE CONTEXT ---\n${fr?.sourceContext || "(see input above)"}\n\n--- PIPELINE STATE ---\n${fr?.pipelineState || `translatedNodes: ${result.stats.translatedNodes}, manualPortCount: ${result.stats.manualPortCount}`}\n\n=== END REPORT ===`;
                     Clipboard.setStringAsync(report);
                   }}
                   style={{ marginTop: 8, marginBottom: 12 }}
@@ -335,25 +374,38 @@ export default function TranslateScreen() {
                 </TouchableOpacity>
                 <ScrollView style={s.outputScroll} nestedScrollEnabled>
                   <Text style={s.codeOutput} selectable>
-{`=== FAILURE REPORT ===
-timestamp: ${result.failureReport.timestamp}
-direction: ${result.failureReport.direction}
-stage: ${result.failureReport.stage}
-input_lines: ${result.failureReport.inputLines}
+{(() => {
+  const fr = result.failureReport;
+  const sourceKind = pickedFile?.name?.endsWith(".L5X") ? "l5x_base64" : pickedFile?.name?.endsWith(".l5k") ? "l5k_text" : "st_text";
+  return `=== FAILURE REPORT ===
+timestamp: ${fr?.timestamp || new Date().toISOString()}
+direction: ${direction}
+source_kind: ${sourceKind}
+stage: ${fr?.stage || "unknown"}
+input_lines: ${fr?.inputLines || result.stats.inputLines}
 
 --- ERROR ---
-${result.failureReport.error}
+${fr?.error || result.diagnostics.filter(d => d.severity === "ERROR").map(d => `[${d.code}] ${d.message}`).join("\n") || "Unknown error"}
 
 --- TRACEBACK ---
-${result.failureReport.traceback}
+${fr?.traceback || "No traceback (diagnostic-level error, not exception)"}
+
+--- INPUT (first 200 chars) ---
+${sourceCode.substring(0, 200)}
+
+--- COUNTERS ---
+routines_discovered: ${result.stats.inputLines}
+routines_emitted: ${result.stats.translatedNodes}
+last_successful_stage: ${fr ? (fr.stage === "parser" ? "init" : "parser") : "emit"}
 
 --- SOURCE CONTEXT ---
-${result.failureReport.sourceContext}
+${fr?.sourceContext || "(see input above)"}
 
 --- PIPELINE STATE ---
-${result.failureReport.pipelineState}
+${fr?.pipelineState || `translatedNodes: ${result.stats.translatedNodes}, manualPortCount: ${result.stats.manualPortCount}`}
 
-=== END REPORT ===`}
+=== END REPORT ===`;
+})()}
                   </Text>
                 </ScrollView>
               </View>

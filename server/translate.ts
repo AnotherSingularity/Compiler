@@ -145,9 +145,23 @@ export function translate(
   try {
     if (direction === "ab2mel") {
       const result = emitMEL(ast, sourceFile, sourceLines);
-      // Check for ERROR diagnostics
+      // Check for ERROR diagnostics or empty output
       const hasErrors = result.diagnostics.some(d => d.severity === "ERROR");
+      const emptyOutput = result.translatedNodes === 0 && inputLines > 1;
       let failureReport: FailureReport | null = null;
+      if (emptyOutput && !hasErrors) {
+        failureReport = {
+          stage: "emit_mel",
+          error: "Pipeline produced 0 translated nodes for non-empty input. Parser may not recognize this input format.",
+          traceback: "No exception — translatedNodes counter is 0",
+          sourceContext: buildSourceContext(source, 1),
+          pipelineState: `AST: ${ast.length} top-level nodes\ntranslatedNodes: 0\noutputLines: ${result.output.split("\n").length}`,
+          timestamp,
+          direction,
+          inputLines,
+        };
+        result.diagnostics.push({ severity: "ERROR", code: "AB_MEL_PIPELINE_002", message: "No nodes translated. Input may not be Structured Text.", line: 0 });
+      }
       if (hasErrors) {
         const firstError = result.diagnostics.find(d => d.severity === "ERROR")!;
         failureReport = {
