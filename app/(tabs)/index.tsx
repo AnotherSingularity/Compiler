@@ -67,6 +67,7 @@ export default function TranslateScreen() {
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [pickedFile, setPickedFile] = useState<{ name: string; size: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const translateMutation = trpc.translate.useMutation();
 
@@ -365,13 +366,67 @@ export default function TranslateScreen() {
                   onPress={() => {
                     const fr = result.failureReport;
                     const sourceKind = pickedFile?.name?.endsWith(".L5X") ? "l5x_base64" : pickedFile?.name?.endsWith(".l5k") ? "l5k_text" : "st_text";
-                    const report = `=== FAILURE REPORT ===\ntimestamp: ${fr?.timestamp || new Date().toISOString()}\ndirection: ${direction}\nsource_kind: ${sourceKind}\nstage: ${fr?.stage || "unknown"}\ninput_lines: ${fr?.inputLines || result.stats.inputLines}\n\n--- ERROR ---\n${fr?.error || result.diagnostics.filter(d => d.severity === "ERROR").map(d => `[${d.code}] ${d.message}`).join("\n") || "Unknown error"}\n\n--- TRACEBACK ---\n${fr?.traceback || "No traceback (diagnostic-level error, not exception)"}\n\n--- INPUT (first 200 chars) ---\n${sourceCode.substring(0, 200)}\n\n--- COUNTERS ---\nroutines_discovered: ${result.stats.inputLines}\nroutines_emitted: ${result.stats.translatedNodes}\nlast_successful_stage: ${fr ? (fr.stage === "parser" ? "init" : "parser") : "emit"}\n\n--- SOURCE CONTEXT ---\n${fr?.sourceContext || "(see input above)"}\n\n--- PIPELINE STATE ---\n${fr?.pipelineState || `translatedNodes: ${result.stats.translatedNodes}, manualPortCount: ${result.stats.manualPortCount}`}\n\n=== END REPORT ===`;
-                    Clipboard.setStringAsync(report);
+                    const reportText = `=== FAILURE REPORT ===\ntimestamp: ${fr?.timestamp || new Date().toISOString()}\ndirection: ${direction}\nsource_kind: ${sourceKind}\nstage: ${fr?.stage || "unknown"}\ninput_lines: ${fr?.inputLines || result.stats.inputLines}\n\n--- ERROR ---\n${fr?.error || result.diagnostics.filter(d => d.severity === "ERROR").map(d => `[${d.code}] ${d.message}`).join("\n") || "Unknown error"}\n\n--- TRACEBACK ---\n${fr?.traceback || "No traceback (diagnostic-level error, not exception)"}\n\n--- INPUT (first 200 chars) ---\n${sourceCode.substring(0, 200)}\n\n--- COUNTERS ---\nroutines_discovered: ${result.stats.inputLines}\nroutines_emitted: ${result.stats.translatedNodes}\nlast_successful_stage: ${fr ? (fr.stage === "parser" ? "init" : "parser") : "emit"}\n\n--- SOURCE CONTEXT ---\n${fr?.sourceContext || "(see input above)"}\n\n--- PIPELINE STATE ---\n${fr?.pipelineState || `translatedNodes: ${result.stats.translatedNodes}, manualPortCount: ${result.stats.manualPortCount}`}\n\n=== END REPORT ===`;
+
+                    // Synchronous clipboard write with fallback chain
+                    let success = false;
+                    // Path 1: navigator.clipboard (must be in gesture context)
+                    if (Platform.OS as string === "web" && typeof navigator !== "undefined" && navigator.clipboard) {
+                      navigator.clipboard.writeText(reportText).then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      }).catch(() => {
+                        // Path 2: execCommand fallback
+                        fallbackCopy(reportText);
+                      });
+                      success = true;
+                    }
+                    if (!success) {
+                      // Native path: use Expo Clipboard
+                      Clipboard.setStringAsync(reportText).then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      }).catch(() => {
+                        fallbackCopy(reportText);
+                      });
+                    }
+
+                    function fallbackCopy(text: string) {
+                      if (Platform.OS as string === "web" && typeof document !== "undefined") {
+                        const ta = document.createElement("textarea");
+                        ta.value = text;
+                        ta.style.position = "fixed";
+                        ta.style.left = "-9999px";
+                        ta.style.top = "-9999px";
+                        document.body.appendChild(ta);
+                        ta.focus();
+                        ta.select();
+                        try {
+                          const ok = document.execCommand("copy");
+                          if (ok) {
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 1500);
+                          } else {
+                            setCopyFailed(true);
+                          }
+                        } catch {
+                          setCopyFailed(true);
+                        }
+                        document.body.removeChild(ta);
+                      } else {
+                        setCopyFailed(true);
+                      }
+                    }
                   }}
                   style={{ marginTop: 8, marginBottom: 12 }}
                 >
-                  <Text style={s.actionLink}>Copy failure report</Text>
+                  <Text style={s.actionLink}>{copied ? "Copied" : "Copy failure report"}</Text>
                 </TouchableOpacity>
+                {copyFailed && (
+                  <Text style={{ fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 12, fontStyle: "italic", color: C.sevError, marginBottom: 8 }}>
+                    Copy failed — text selected below, long-press to copy
+                  </Text>
+                )}
                 <ScrollView style={s.outputScroll} nestedScrollEnabled>
                   <Text style={s.codeOutput} selectable>
 {(() => {
