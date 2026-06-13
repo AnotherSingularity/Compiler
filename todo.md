@@ -36,3 +36,6 @@
 - [x] REBUILD: IR walker that transforms nodes (not regex on text)
 - [x] REBUILD: FunctionCall IR nodes matched against untranslatable rules
 - [x] REBUILD: Emitter walks AST to produce MEL ST output
+- [x] Bug: BitAccess assign must conditionally BSET/BRST based on RHS, not unconditional
+- [x] Bug: Type conversions (DINT_TO_INT, REAL_TO_DINT) must pass through as-is, not rewrite to INT()/DINT()
+- [x] Bug: MANUAL_PORT instances must flag all subsequent .MEMBER references in same scope

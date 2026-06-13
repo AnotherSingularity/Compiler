@@ -58,6 +58,16 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
   const allocator = new Allocator();
   let translated = 0;
   const out: string[] = [];
+  // Track instances that triggered MANUAL_PORT (e.g., PID instances)
+  const manualPortInstances = new Set<string>();
+
+  // Extract base identifier from an AST node (for member access checks)
+  function getBaseIdent(node: ASTNode): string {
+    if (node.kind === "ident") return (node as IdentNode).name;
+    if (node.kind === "member_access") return getBaseIdent((node as MemberAccessNode).object);
+    if (node.kind === "index") return getBaseIdent((node as IndexNode).array);
+    return "";
+  }
 
   function provenance(line: number): string {
     const orig = sourceLines[line - 1]?.trim() || "";
@@ -79,6 +89,14 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
       case "member_access": {
         const n = node as MemberAccessNode;
         const obj = emitExpr(n.object);
+        const baseIdent = getBaseIdent(n.object);
+        // If this references a MANUAL_PORT instance, flag it
+        if (manualPortInstances.has(baseIdent)) {
+          // Emit diagnostic for this reference
+          diags.push({ severity: "MANUAL_PORT", code: "AB_MEL_PID_002", message: `Reference to manual-ported instance: ${baseIdent}.${n.member} — no MEL equivalent`, line: n.line });
+          // Return a placeholder variable name that the engineer must replace
+          return `${baseIdent}_${n.member} (* NEEDS_MANUAL_MAP *)`;
+        }
         // Rewrite timer/counter members
         const melMember = TIMER_MEMBERS[n.member] || COUNTER_MEMBERS[n.member] || n.member;
         return `${obj}.${melMember}`;
@@ -93,11 +111,8 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
       }
       case "function_call": {
         const n = node as FunctionCallNode;
-        // Type conversions
-        if (n.name.includes("_TO_")) {
-          const target = n.name.split("_TO_")[1];
-          return `${target}(${n.args.map(emitExpr).join(", ")})`;
-        }
+        // Type conversions: keep IEC standard names (DINT_TO_INT, REAL_TO_DINT, etc.)
+        // These are valid in GX Works2 — do NOT rewrite to bare type names
         return `${n.name}(${n.args.map(emitExpr).join(", ")})`;
       }
       case "type_cast": { const n = node as TypeCastNode; return `${n.targetType}(${emitExpr(n.expr)})`; }
@@ -134,18 +149,35 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
         out.push(`${indent}${provenance(n.line)}`);
         const target = emitExpr(n.target);
         const value = emitExpr(n.value);
-        // Bit-write: if target is BTEST, use BSET/BRST
+        // Bit-write: if target is BTEST, conditionally BSET/BRST based on RHS
         if (target.startsWith("BTEST(")) {
           const match = target.match(/BTEST\((.+),\s*(\d+)\)/);
           if (match) {
+            const word = match[1];
+            const bit = match[2];
+            // If RHS is a constant, emit directly
             if (value === "1" || value === "TRUE") {
-              out.push(`${indent}BSET(TRUE, ${match[1]}, ${match[2]});`);
+              out.push(`${indent}BSET(TRUE, ${word}, ${bit});`);
+            } else if (value === "0" || value === "FALSE") {
+              out.push(`${indent}BRST(TRUE, ${word}, ${bit});`);
             } else {
-              out.push(`${indent}BRST(TRUE, ${match[1]}, ${match[2]});`);
+              // RHS is a variable/expression — conditional set/reset
+              out.push(`${indent}IF ${value} THEN`);
+              out.push(`${indent}  BSET(TRUE, ${word}, ${bit});`);
+              out.push(`${indent}ELSE`);
+              out.push(`${indent}  BRST(TRUE, ${word}, ${bit});`);
+              out.push(`${indent}END_IF;`);
             }
             translated++;
             break;
           }
+        }
+        // Check if target references a MANUAL_PORT instance
+        if (manualPortInstances.has(getBaseIdent(n.target))) {
+          diags.push({ severity: "MANUAL_PORT", code: "AB_MEL_PID_002", message: `Reference to manual-ported instance member: ${target}`, line: n.line });
+          out.push(`${indent}(* MANUAL PORT: ${target} := ${value} — instance has no MEL equivalent *)`);
+          translated++;
+          break;
         }
         out.push(`${indent}${target} := ${value};`);
         translated++;
@@ -157,6 +189,10 @@ export function emitMEL(ast: ASTNode[], sourceFile: string, sourceLines: string[
         if (UNTRANSLATABLE[n.name]) {
           const info = UNTRANSLATABLE[n.name];
           diags.push({ severity: "MANUAL_PORT", code: info.code, message: info.message, line: n.line });
+          // Track the first arg as a manual-ported instance
+          if (n.args[0] && n.args[0].kind === "ident") {
+            manualPortInstances.add((n.args[0] as IdentNode).name);
+          }
           out.push(`${indent}(* MANUAL PORT REQUIRED: ${n.name} block from ${sourceFile}:${n.line}`);
           out.push(`${indent}   Original call: ${sourceLines[n.line - 1]?.trim() || n.name + "(...)"}`);
           out.push(`${indent}   ${info.message}`);
