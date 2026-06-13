@@ -10,6 +10,8 @@ import {
   Platform,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -23,6 +25,7 @@ export default function TranslateScreen() {
   const [direction, setDirection] = useState<Direction>("ab2mel");
   const [sourceCode, setSourceCode] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
+  const [pickedFile, setPickedFile] = useState<{ name: string; size: number } | null>(null);
   const router = useRouter();
 
   const translateMutation = trpc.translate.useMutation();
@@ -39,6 +42,7 @@ export default function TranslateScreen() {
       const text = await Clipboard.getStringAsync();
       if (text) {
         setSourceCode(text);
+        setPickedFile(null);
         if (Platform.OS !== "web") {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }
@@ -48,9 +52,43 @@ export default function TranslateScreen() {
     }
   };
 
+  const handlePickFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["text/plain", "text/xml", "application/xml", "*/*"],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) return;
+
+      const asset = result.assets[0];
+      if (!asset) return;
+
+      // Read file content
+      let content: string;
+      if (Platform.OS === "web" && asset.file) {
+        content = await asset.file.text();
+      } else {
+        content = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+      }
+
+      if (content) {
+        setSourceCode(content);
+        setPickedFile({ name: asset.name, size: asset.size || content.length });
+        if (Platform.OS !== "web") {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      }
+    } catch (error: any) {
+      Alert.alert("File Error", "Could not read the selected file. Make sure it's a text file.");
+    }
+  };
+
   const handleTranslate = useCallback(async () => {
     if (!sourceCode.trim()) {
-      Alert.alert("No Input", "Please paste or type Structured Text code to translate.");
+      Alert.alert("No Input", "Please paste ST code or upload a text file to translate.");
       return;
     }
 
@@ -83,7 +121,6 @@ export default function TranslateScreen() {
         mappingYaml: result.mappingYaml,
         ok: result.ok,
       });
-      // Keep last 50
       if (history.length > 50) history.pop();
       await AsyncStorage.setItem(historyKey, JSON.stringify(history));
 
@@ -150,15 +187,38 @@ export default function TranslateScreen() {
         <View className="bg-surface rounded-xl p-3 mb-4 border border-border">
           <Text className="text-xs text-muted">
             {direction === "ab2mel"
-              ? "Paste Allen-Bradley Studio 5000 Structured Text below. Output will be GX Works2 compatible."
-              : "Paste Mitsubishi GX Works2 Structured Text below. Output will be Studio 5000 compatible."}
+              ? "Paste Allen-Bradley Studio 5000 Structured Text or upload a file. Output will be GX Works2 compatible."
+              : "Paste Mitsubishi GX Works2 Structured Text or upload a file. Output will be Studio 5000 compatible."}
           </Text>
+        </View>
+
+        {/* Input Method: File Upload */}
+        <View className="mb-3">
+          <TouchableOpacity
+            onPress={handlePickFile}
+            className="bg-surface border-2 border-dashed border-border rounded-xl p-4 items-center"
+            activeOpacity={0.7}
+          >
+            {pickedFile ? (
+              <View className="items-center">
+                <Text className="text-success font-semibold text-sm">File loaded</Text>
+                <Text className="text-xs text-muted mt-1">
+                  {pickedFile.name} ({(pickedFile.size / 1024).toFixed(1)} KB)
+                </Text>
+              </View>
+            ) : (
+              <View className="items-center">
+                <Text className="text-primary font-semibold text-sm">Upload File</Text>
+                <Text className="text-xs text-muted mt-1">.st, .txt, .L5X or any text file</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Source Code Input */}
         <View className="mb-4">
           <View className="flex-row justify-between items-center mb-2">
-            <Text className="text-sm font-medium text-foreground">Source Code</Text>
+            <Text className="text-sm font-medium text-foreground">Or paste code</Text>
             <TouchableOpacity
               onPress={handlePasteFromClipboard}
               className="bg-surface px-3 py-1.5 rounded-lg border border-border"
@@ -168,7 +228,7 @@ export default function TranslateScreen() {
             </TouchableOpacity>
           </View>
           <TextInput
-            className="bg-surface border border-border rounded-xl p-4 text-foreground min-h-[240px]"
+            className="bg-surface border border-border rounded-xl p-4 text-foreground min-h-[200px]"
             style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, lineHeight: 20 }}
             multiline
             textAlignVertical="top"
@@ -179,7 +239,10 @@ export default function TranslateScreen() {
             }
             placeholderTextColor="#64748B"
             value={sourceCode}
-            onChangeText={setSourceCode}
+            onChangeText={(text) => {
+              setSourceCode(text);
+              if (pickedFile) setPickedFile(null);
+            }}
             autoCapitalize="none"
             autoCorrect={false}
             spellCheck={false}

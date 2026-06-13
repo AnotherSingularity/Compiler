@@ -7,7 +7,7 @@
 - [x] Build History screen with local storage
 - [x] Create server-side translation endpoint using compiler core
 - [x] Wire translation API to mobile app
-- [ ] Add file picker for L5X upload
+- [x] Add file picker for .st/.txt/.L5X text file upload
 - [x] Add clipboard paste/copy functionality
 - [x] Add syntax highlighting for ST output
 - [x] Add diagnostic severity color coding
