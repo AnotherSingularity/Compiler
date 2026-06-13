@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  StyleSheet,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
@@ -26,8 +27,22 @@ interface TranslationResult {
   diagnostics: Array<{ severity: string; code: string; message: string; line: number }>;
   mappingYaml: string;
   labelsCsv: string;
-  stats: { inputLines: number; outputLines: number; warningCount: number; manualPortCount: number };
+  stats: { inputLines: number; outputLines: number; warningCount: number; manualPortCount: number; translatedNodes: number };
 }
+
+const C = {
+  bgBase: "#0a0a0a",
+  bgElevated: "#131313",
+  rule: "#2a2620",
+  textPrimary: "#e8e2d0",
+  textMuted: "#9a9382",
+  gold: "#c9a961",
+  goldDim: "#8a7440",
+  sevInfo: "#9a9382",
+  sevWarn: "#c9a961",
+  sevManual: "#d68a3a",
+  sevError: "#b04a3a",
+};
 
 export default function TranslateScreen() {
   const [direction, setDirection] = useState<Direction>("ab2mel");
@@ -37,7 +52,6 @@ export default function TranslateScreen() {
   const [pickedFile, setPickedFile] = useState<{ name: string; size: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-
   const translateMutation = trpc.translate.useMutation();
 
   const handleDirectionChange = (dir: Direction) => {
@@ -48,64 +62,33 @@ export default function TranslateScreen() {
 
   const handlePaste = async () => {
     const text = await Clipboard.getStringAsync();
-    if (text) {
-      setSourceCode(text);
-      setPickedFile(null);
-      setResult(null);
-      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+    if (text) { setSourceCode(text); setPickedFile(null); setResult(null); }
   };
 
   const handlePickFile = async () => {
     try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: ["text/plain", "text/xml", "application/xml", "application/octet-stream", "*/*"],
-        copyToCacheDirectory: true,
-      });
+      const res = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
       if (res.canceled) return;
       const asset = res.assets[0];
       if (!asset) return;
-
       let content: string;
-      if (Platform.OS as string === "web" && asset.file) {
-        content = await asset.file.text();
-      } else {
-        content = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.UTF8 });
-      }
-
-      if (content) {
-        setSourceCode(content);
-        setPickedFile({ name: asset.name, size: asset.size || content.length });
-        setResult(null);
-        if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-    } catch {
-      Alert.alert("File Error", "Could not read file. Make sure it's a text file (.st, .txt, .L5X).");
-    }
+      if (Platform.OS as string === "web" && asset.file) { content = await asset.file.text(); }
+      else { content = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.UTF8 }); }
+      if (content) { setSourceCode(content); setPickedFile({ name: asset.name, size: asset.size || content.length }); setResult(null); }
+    } catch { Alert.alert("File Error", "Could not read file."); }
   };
 
   const handleTranslate = useCallback(async () => {
-    if (!sourceCode.trim()) {
-      Alert.alert("No Input", "Upload a file or paste ST code first.");
-      return;
-    }
+    if (!sourceCode.trim()) { Alert.alert("No Input", "Upload a file or paste ST code."); return; }
     setIsTranslating(true);
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
     try {
       const res = await translateMutation.mutateAsync({ direction, source: sourceCode });
       setResult(res);
-      // Scroll to output
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
-      if (Platform.OS !== "web") {
-        Haptics.notificationAsync(res.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error);
-      }
     } catch (error: any) {
       Alert.alert("Error", error?.message || "Translation failed.");
-      if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setIsTranslating(false);
-    }
+    } finally { setIsTranslating(false); }
   }, [sourceCode, direction, translateMutation]);
 
   const handleCopyOutput = async () => {
@@ -113,230 +96,137 @@ export default function TranslateScreen() {
     await Clipboard.setStringAsync(result.output);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-    if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
   const handleDownload = async () => {
     if (!result?.output) return;
-
     const filename = direction === "ab2mel" ? "translated_MEL.st" : "translated_AB.st";
-
     if (Platform.OS as string === "web") {
       const blob = new Blob([result.output], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const a = document.createElement("a"); a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
       return;
     }
-
-    // Android/iOS: write to cache then share
     try {
       const fileUri = `${FileSystem.cacheDirectory}${filename}`;
       await FileSystem.writeAsStringAsync(fileUri, result.output, { encoding: FileSystem.EncodingType.UTF8 });
-
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: "text/plain",
-          dialogTitle: `Save ${filename}`,
-          UTI: "public.plain-text",
-        });
-      } else {
-        // Fallback: copy to documents dir
-        const docUri = `${FileSystem.documentDirectory}${filename}`;
-        await FileSystem.copyAsync({ from: fileUri, to: docUri });
-        Alert.alert("Saved", `File saved to app documents:\n${filename}`);
-      }
-      if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (err: any) {
-      Alert.alert("Download Error", err?.message || "Could not save file.");
-    }
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: "text/plain", dialogTitle: `Save ${filename}`, UTI: "public.plain-text" });
+      } else { Alert.alert("Saved", `File saved: ${filename}`); }
+    } catch (err: any) { Alert.alert("Error", err?.message || "Could not save file."); }
   };
 
+  const sevColor = (sev: string) => sev === "ERROR" ? C.sevError : sev === "MANUAL_PORT" ? C.sevManual : sev === "WARN" ? C.sevWarn : C.sevInfo;
+
   return (
-    <ScreenContainer className="px-4 pt-2">
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Header */}
-        <View className="items-center mb-3 mt-2">
-          <Text className="text-2xl font-bold text-foreground">AB↔MEL Compiler</Text>
-          <Text className="text-sm text-muted mt-1">Structured Text Translation</Text>
+    <ScreenContainer containerClassName="bg-background">
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        {/* Wordmark */}
+        <View style={{ alignItems: "center", marginTop: 24, marginBottom: 8 }}>
+          <Text style={s.wordmark}>ST Compiler</Text>
+          <Text style={s.subtitle}>Allen-Bradley ↔ Mitsubishi</Text>
         </View>
 
-        {/* Direction Toggle */}
-        <View className="flex-row bg-surface rounded-xl p-1 mb-4 border border-border">
-          <TouchableOpacity
-            className={`flex-1 py-3 rounded-lg items-center ${direction === "ab2mel" ? "bg-primary" : ""}`}
-            onPress={() => handleDirectionChange("ab2mel")}
-            activeOpacity={0.7}
-          >
-            <Text className={`font-bold text-base ${direction === "ab2mel" ? "text-background" : "text-muted"}`}>
-              AB → MEL
-            </Text>
+        {/* Direction toggle */}
+        <View style={s.dirRow}>
+          <TouchableOpacity onPress={() => handleDirectionChange("ab2mel")} activeOpacity={0.7}>
+            <Text style={[s.dirText, direction === "ab2mel" && s.dirActive]}>AB → MEL</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            className={`flex-1 py-3 rounded-lg items-center ${direction === "mel2ab" ? "bg-primary" : ""}`}
-            onPress={() => handleDirectionChange("mel2ab")}
-            activeOpacity={0.7}
-          >
-            <Text className={`font-bold text-base ${direction === "mel2ab" ? "text-background" : "text-muted"}`}>
-              MEL → AB
-            </Text>
+          <Text style={s.dirSep}>│</Text>
+          <TouchableOpacity onPress={() => handleDirectionChange("mel2ab")} activeOpacity={0.7}>
+            <Text style={[s.dirText, direction === "mel2ab" && s.dirActive]}>MEL → AB</Text>
           </TouchableOpacity>
         </View>
 
-        {/* File Upload */}
-        <TouchableOpacity
-          onPress={handlePickFile}
-          className="bg-surface border-2 border-dashed border-primary/40 rounded-xl p-5 items-center mb-3"
-          activeOpacity={0.7}
-        >
+        {/* File upload */}
+        <View style={s.hairline} />
+        <TouchableOpacity onPress={handlePickFile} style={s.uploadArea} activeOpacity={0.7}>
           {pickedFile ? (
-            <View className="items-center">
-              <Text className="text-success font-bold text-base">File Loaded</Text>
-              <Text className="text-sm text-muted mt-1">{pickedFile.name} ({(pickedFile.size / 1024).toFixed(1)} KB)</Text>
-            </View>
+            <Text style={s.uploadLoaded}>{pickedFile.name} — {(pickedFile.size / 1024).toFixed(1)} KB</Text>
           ) : (
-            <View className="items-center">
-              <Text className="text-primary font-bold text-base">Upload ST File</Text>
-              <Text className="text-xs text-muted mt-1">.st, .txt, .L5X — tap to browse</Text>
-            </View>
+            <Text style={s.uploadPrompt}>Drop an .L5X or .st file, or tap to select</Text>
           )}
         </TouchableOpacity>
+        <View style={s.hairline} />
 
-        {/* Or paste */}
-        <View className="flex-row justify-between items-center mb-2">
-          <Text className="text-sm font-medium text-foreground">Or paste code directly</Text>
-          <TouchableOpacity onPress={handlePaste} className="bg-primary/10 px-3 py-1.5 rounded-lg" activeOpacity={0.7}>
-            <Text className="text-xs text-primary font-bold">Paste from Clipboard</Text>
-          </TouchableOpacity>
+        {/* Paste */}
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 16, marginBottom: 8 }}>
+          <Text style={s.label}>Or paste code</Text>
+          <TouchableOpacity onPress={handlePaste}><Text style={s.actionLink}>Paste from clipboard</Text></TouchableOpacity>
         </View>
 
-        <TextInput
-          className="bg-surface border border-border rounded-xl p-4 text-foreground min-h-[180px] mb-4"
-          style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, lineHeight: 20 }}
-          multiline
-          textAlignVertical="top"
-          placeholder={direction === "ab2mel"
-            ? "// AB Structured Text\nIF RunMode THEN\n  Speed := SetPoint * 0.95;\n  TON(RunTimer);\nEND_IF;"
-            : "// MEL Structured Text\nIF M100 THEN\n  RunTimer(IN := M100, PT := T#5000);\nEND_IF;"
-          }
-          placeholderTextColor="#64748B"
-          value={sourceCode}
-          onChangeText={(t) => { setSourceCode(t); setPickedFile(null); setResult(null); }}
-          autoCapitalize="none"
-          autoCorrect={false}
-          spellCheck={false}
-        />
+        {/* Code input */}
+        <View style={s.inputBorder}>
+          <TextInput
+            style={s.codeInput}
+            multiline
+            textAlignVertical="top"
+            placeholder={direction === "ab2mel" ? "// AB Structured Text\nIF RunMode THEN\n  Speed := SetPoint * 0.95;\n  TON(RunTimer);\nEND_IF;" : "// MEL Structured Text\nIF M100 THEN\n  RunTimer(IN := M100, PT := T#5000);\nEND_IF;"}
+            placeholderTextColor={C.textMuted}
+            value={sourceCode}
+            onChangeText={(t) => { setSourceCode(t); setPickedFile(null); setResult(null); }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+          />
+        </View>
 
-        {/* Translate Button */}
-        <TouchableOpacity
-          className={`w-full py-4 rounded-xl items-center ${isTranslating ? "bg-primary/60" : "bg-primary"}`}
-          onPress={handleTranslate}
-          disabled={isTranslating}
-          activeOpacity={0.8}
-        >
+        {/* Compile button */}
+        <TouchableOpacity onPress={handleTranslate} disabled={isTranslating} style={s.compileBtn} activeOpacity={0.7}>
           {isTranslating ? (
-            <View className="flex-row items-center gap-2">
-              <ActivityIndicator color="white" size="small" />
-              <Text className="text-background font-bold text-lg">Compiling...</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <ActivityIndicator color={C.gold} size="small" />
+              <Text style={s.compileBtnText}>Compiling…</Text>
             </View>
           ) : (
-            <Text className="text-background font-bold text-lg">Compile & Translate</Text>
+            <Text style={s.compileBtnText}>Compile & Translate</Text>
           )}
         </TouchableOpacity>
 
-        {/* === OUTPUT SECTION === */}
+        {/* === OUTPUT === */}
         {result && (
-          <View className="mt-6">
-            {/* Status */}
-            <View className="flex-row items-center gap-2 mb-3">
-              <View className={`w-3 h-3 rounded-full ${result.ok ? "bg-success" : "bg-error"}`} />
-              <Text className={`font-bold text-base ${result.ok ? "text-success" : "text-error"}`}>
-                {result.ok ? "Translation Complete" : "Translation Has Errors"}
-              </Text>
+          <View style={{ marginTop: 32 }}>
+            <View style={s.hairline} />
+
+            {/* Stats line */}
+            <Text style={s.statsLine}>
+              <Text>{result.stats.inputLines} lines in</Text>
+              <Text style={s.statsSep}> · </Text>
+              <Text>{result.stats.outputLines} lines out</Text>
+              <Text style={s.statsSep}> · </Text>
+              <Text>{result.stats.translatedNodes} nodes</Text>
+              <Text style={s.statsSep}> · </Text>
+              <Text style={result.stats.manualPortCount > 0 ? { color: C.sevManual } : undefined}>{result.stats.manualPortCount} manual port</Text>
+              <Text style={s.statsSep}> · </Text>
+              <Text style={result.stats.warningCount > 0 ? { color: C.sevWarn } : undefined}>{result.stats.warningCount} warnings</Text>
+            </Text>
+
+            {/* Actions */}
+            <View style={{ flexDirection: "row", gap: 24, marginTop: 16, marginBottom: 16 }}>
+              <TouchableOpacity onPress={handleDownload}><Text style={s.actionLink}>Download .st</Text></TouchableOpacity>
+              <TouchableOpacity onPress={handleCopyOutput}><Text style={s.actionLink}>{copied ? "Copied" : "Copy output"}</Text></TouchableOpacity>
             </View>
 
-            {/* Stats */}
-            <View className="flex-row bg-surface rounded-xl p-3 mb-3 border border-border">
-              <View className="flex-1 items-center">
-                <Text className="text-lg font-bold text-foreground">{result.stats.inputLines}</Text>
-                <Text className="text-xs text-muted">Input Lines</Text>
-              </View>
-              <View className="flex-1 items-center">
-                <Text className="text-lg font-bold text-foreground">{result.stats.outputLines}</Text>
-                <Text className="text-xs text-muted">Output Lines</Text>
-              </View>
-              <View className="flex-1 items-center">
-                <Text className="text-lg font-bold text-warning">{result.stats.warningCount}</Text>
-                <Text className="text-xs text-muted">Warnings</Text>
-              </View>
-              <View className="flex-1 items-center">
-                <Text className="text-lg font-bold" style={{ color: "#F97316" }}>{result.stats.manualPortCount}</Text>
-                <Text className="text-xs text-muted">Manual</Text>
-              </View>
-            </View>
-
-            {/* Download Button — BIG and obvious */}
-            <TouchableOpacity
-              onPress={handleDownload}
-              className="w-full py-4 rounded-xl items-center bg-success mb-3"
-              activeOpacity={0.8}
-            >
-              <Text className="text-background font-bold text-lg">
-                Download {direction === "ab2mel" ? "MEL" : "AB"} File (.st)
-              </Text>
-            </TouchableOpacity>
-
-            {/* Copy Button */}
-            <TouchableOpacity
-              onPress={handleCopyOutput}
-              className="w-full py-3 rounded-xl items-center bg-surface border border-border mb-4"
-              activeOpacity={0.7}
-            >
-              <Text className="text-primary font-bold">{copied ? "Copied to Clipboard!" : "Copy Output to Clipboard"}</Text>
-            </TouchableOpacity>
-
-            {/* Output Code */}
-            <Text className="text-sm font-bold text-foreground mb-2">Translated Output:</Text>
-            <View className="bg-surface rounded-xl border border-border p-4 max-h-[400px]">
-              <ScrollView nestedScrollEnabled>
-                <Text
-                  className="text-foreground"
-                  style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, lineHeight: 18 }}
-                  selectable
-                >
-                  {result.output}
-                </Text>
-              </ScrollView>
-            </View>
+            {/* Output code */}
+            <ScrollView style={s.outputScroll} nestedScrollEnabled>
+              <Text style={s.codeOutput} selectable>{result.output}</Text>
+            </ScrollView>
 
             {/* Diagnostics */}
             {result.diagnostics.length > 0 && (
-              <View className="mt-4">
-                <Text className="text-sm font-bold text-foreground mb-2">
-                  Diagnostics ({result.diagnostics.length}):
-                </Text>
+              <View style={{ marginTop: 24 }}>
+                <Text style={s.sectionHead}>Diagnostics</Text>
+                <View style={s.hairline} />
                 {result.diagnostics.map((d, i) => (
-                  <View key={i} className="bg-surface rounded-lg p-3 mb-2 border border-border">
-                    <View className="flex-row items-center gap-2">
-                      <View className="w-2 h-2 rounded-full" style={{
-                        backgroundColor: d.severity === "ERROR" ? "#EF4444" : d.severity === "WARN" ? "#EAB308" : d.severity === "MANUAL_PORT" ? "#F97316" : "#6B7280"
-                      }} />
-                      <Text className="text-xs font-bold" style={{
-                        color: d.severity === "ERROR" ? "#EF4444" : d.severity === "WARN" ? "#EAB308" : d.severity === "MANUAL_PORT" ? "#F97316" : "#6B7280"
-                      }}>{d.severity}</Text>
-                      <Text className="text-xs text-muted">Line {d.line}</Text>
-                    </View>
-                    <Text className="text-sm text-foreground mt-1">{d.message}</Text>
+                  <View key={i} style={s.diagRow}>
+                    <Text style={[s.diagSev, { color: sevColor(d.severity) }]}>
+                      {d.severity === "MANUAL_PORT" ? "M" : d.severity[0]}
+                    </Text>
+                    <Text style={s.diagCode}>{d.code}</Text>
+                    <Text style={s.diagMsg}>{d.message}</Text>
+                    {d.line > 0 && <Text style={s.diagLine}>{d.line}</Text>}
                   </View>
                 ))}
               </View>
@@ -347,3 +237,32 @@ export default function TranslateScreen() {
     </ScreenContainer>
   );
 }
+
+const s = StyleSheet.create({
+  wordmark: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 28, fontWeight: "500", color: C.gold, letterSpacing: 0.3 },
+  subtitle: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 14, fontStyle: "italic", color: C.textMuted, marginTop: 4 },
+  dirRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", marginVertical: 20, gap: 16 },
+  dirText: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 16, color: C.textMuted },
+  dirActive: { color: C.gold },
+  dirSep: { color: C.rule, fontSize: 16 },
+  hairline: { height: 1, backgroundColor: C.rule, marginVertical: 12 },
+  uploadArea: { paddingVertical: 20, alignItems: "center" },
+  uploadPrompt: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 15, fontStyle: "italic", color: C.textMuted, textAlign: "center" },
+  uploadLoaded: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 15, color: C.gold, textAlign: "center" },
+  label: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 15, color: C.textPrimary },
+  actionLink: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 14, fontStyle: "italic", color: C.gold },
+  inputBorder: { borderWidth: 1, borderColor: C.rule, borderRadius: 2, marginBottom: 20 },
+  codeInput: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, lineHeight: 19, color: C.textPrimary, backgroundColor: C.bgBase, padding: 16, minHeight: 180, textAlignVertical: "top" },
+  compileBtn: { borderWidth: 1, borderColor: C.gold, borderRadius: 2, paddingVertical: 14, alignItems: "center" },
+  compileBtnText: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 15, color: C.gold, letterSpacing: 1.5, textTransform: "uppercase" },
+  statsLine: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 13, fontStyle: "italic", color: C.textMuted, marginTop: 12 },
+  statsSep: { color: C.rule },
+  outputScroll: { maxHeight: 400, borderWidth: 1, borderColor: C.rule, borderRadius: 2, padding: 16, backgroundColor: C.bgBase },
+  codeOutput: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, lineHeight: 18, color: C.textPrimary },
+  sectionHead: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 18, fontWeight: "500", color: C.textPrimary, marginBottom: 8 },
+  diagRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.rule, gap: 8 },
+  diagSev: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, fontWeight: "700", width: 16 },
+  diagCode: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 11, color: C.textMuted },
+  diagMsg: { fontFamily: Platform.OS === "ios" ? "Georgia" : "serif", fontSize: 13, color: C.textPrimary, flex: 1 },
+  diagLine: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, color: C.gold },
+});

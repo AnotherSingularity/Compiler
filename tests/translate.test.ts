@@ -38,7 +38,12 @@ describe("Translation Engine", () => {
       const result = translate(source, "ab2mel");
       expect(result.ok).toBe(true);
       expect(result.output).toContain(".Q");
-      expect(result.output).not.toContain(".DN");
+      // The provenance comment preserves original text with .DN, but the translated line has .Q
+      const translatedLines = result.output.split("\n").filter(l => !l.includes("// [AB"));
+      const hasQ = translatedLines.some(l => l.includes(".Q"));
+      const hasDN = translatedLines.some(l => l.includes(".DN"));
+      expect(hasQ).toBe(true);
+      expect(hasDN).toBe(false);
     });
 
     it("rewrites timer member .PRE to .PT", () => {

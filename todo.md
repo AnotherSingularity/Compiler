@@ -19,3 +19,8 @@
 - [x] Fix: rebuild translation engine to do real AB→MEL compilation (not just member swaps)
 - [x] Fix: download/share broken on Android — must use Sharing API correctly
 - [x] Fix: output screen must show translated result immediately after translate
+- [x] Patch v0.1.1: PID/PIDE must trigger MANUAL_PORT diagnostic
+- [x] Patch v0.1.1: Emit provenance comments (// [AB→MEL] src: ... line N)
+- [x] Patch v0.1.1: Count translated_nodes accurately (not 0)
+- [x] Patch v0.1.1: Apply restrained serif visual system (Section C palette)
+- [x] Patch v0.1.1: Remove all blue/green/shadows/border-radius from UI
