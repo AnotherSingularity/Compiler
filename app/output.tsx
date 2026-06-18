@@ -14,24 +14,22 @@ import * as Sharing from "expo-sharing";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import { ScreenContainer } from "@/components/screen-container";
-
-type TabName = "output" | "diagnostics" | "mapping";
-
+type TabName = "output" | "diagnostics" | "mapping" | "labels" | "fb_defs";
 interface Diagnostic {
   severity: "INFO" | "WARN" | "MANUAL_PORT" | "ERROR";
   code: string;
   message: string;
   line: number;
 }
-
 interface TranslationResult {
   ok: boolean;
   output: string;
   diagnostics: Diagnostic[];
   mappingYaml: string;
   labelsCsv: string;
+  fbDefinitions: string;
+  udtDefinitions: string;
   stats: {
     inputLines: number;
     outputLines: number;
@@ -39,31 +37,26 @@ interface TranslationResult {
     manualPortCount: number;
   };
 }
-
 const SEVERITY_COLORS: Record<string, string> = {
   INFO: "#6B7280",
   WARN: "#EAB308",
   MANUAL_PORT: "#F97316",
   ERROR: "#EF4444",
 };
-
 export default function OutputScreen() {
   const [activeTab, setActiveTab] = useState<TabName>("output");
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [copied, setCopied] = useState(false);
   const router = useRouter();
-
   useEffect(() => {
     loadResult();
   }, []);
-
   const loadResult = async () => {
     const data = await AsyncStorage.getItem("last_translation");
     if (data) {
       setResult(JSON.parse(data));
     }
   };
-
   const handleCopy = async (text: string) => {
     await Clipboard.setStringAsync(text);
     setCopied(true);
@@ -72,10 +65,8 @@ export default function OutputScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   };
-
   const handleDownload = async () => {
     if (!result?.output) return;
-
     if (Platform.OS as string === "web") {
       // Web: trigger browser download
       const blob = new Blob([result.output], { type: "text/plain" });
@@ -87,14 +78,12 @@ export default function OutputScreen() {
       URL.revokeObjectURL(url);
       return;
     }
-
     // Native: write file and share
     try {
       const fileUri = FileSystem.documentDirectory + "translated_output.st";
       await FileSystem.writeAsStringAsync(fileUri, result.output, {
         encoding: FileSystem.EncodingType.UTF8,
       });
-
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri, {
           mimeType: "text/plain",
@@ -104,7 +93,6 @@ export default function OutputScreen() {
       } else {
         Alert.alert("Saved", `File saved to app storage:\n${fileUri}`);
       }
-
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
@@ -112,10 +100,8 @@ export default function OutputScreen() {
       Alert.alert("Error", "Could not save file: " + (error?.message || "Unknown error"));
     }
   };
-
   const handleDownloadMapping = async () => {
     if (!result?.mappingYaml) return;
-
     if (Platform.OS as string === "web") {
       const blob = new Blob([result.mappingYaml], { type: "text/yaml" });
       const url = URL.createObjectURL(blob);
@@ -126,13 +112,11 @@ export default function OutputScreen() {
       URL.revokeObjectURL(url);
       return;
     }
-
     try {
       const fileUri = FileSystem.documentDirectory + "mapping.yaml";
       await FileSystem.writeAsStringAsync(fileUri, result.mappingYaml, {
         encoding: FileSystem.EncodingType.UTF8,
       });
-
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri, {
           mimeType: "text/yaml",
@@ -143,11 +127,90 @@ export default function OutputScreen() {
       Alert.alert("Error", "Could not save file: " + (error?.message || "Unknown error"));
     }
   };
-
+  const handleDownloadLabels = async () => {
+    if (!result?.labelsCsv) return;
+    if (Platform.OS as string === "web") {
+      const blob = new Blob([result.labelsCsv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "labels.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    try {
+      const fileUri = FileSystem.documentDirectory + "labels.csv";
+      await FileSystem.writeAsStringAsync(fileUri, result.labelsCsv, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/csv",
+          dialogTitle: "Save Labels CSV",
+        });
+      }
+    } catch (error: any) {
+      Alert.alert("Error", "Could not save file: " + (error?.message || "Unknown error"));
+    }
+  };
+  const handleDownloadFbDefs = async () => {
+    if (!result?.fbDefinitions) return;
+    if (Platform.OS as string === "web") {
+      const blob = new Blob([result.fbDefinitions], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "fb_definitions.st";
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    try {
+      const fileUri = FileSystem.documentDirectory + "fb_definitions.st";
+      await FileSystem.writeAsStringAsync(fileUri, result.fbDefinitions, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/plain",
+          dialogTitle: "Save FB Definitions",
+        });
+      }
+    } catch (error: any) {
+      Alert.alert("Error", "Could not save file: " + (error?.message || "Unknown error"));
+    }
+  };
+  const handleDownloadUdtDefs = async () => {
+    if (!result?.udtDefinitions) return;
+    if (Platform.OS as string === "web") {
+      const blob = new Blob([result.udtDefinitions], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "udt_definitions.txt";
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    try {
+      const fileUri = FileSystem.documentDirectory + "udt_definitions.txt";
+      await FileSystem.writeAsStringAsync(fileUri, result.udtDefinitions, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/plain",
+          dialogTitle: "Save UDT Definitions",
+        });
+      }
+    } catch (error: any) {
+      Alert.alert("Error", "Could not save file: " + (error?.message || "Unknown error"));
+    }
+  };
   const handleBack = () => {
     router.back();
   };
-
   if (!result) {
     return (
       <ScreenContainer className="px-4 pt-4">
@@ -160,7 +223,6 @@ export default function OutputScreen() {
       </ScreenContainer>
     );
   }
-
   return (
     <ScreenContainer className="px-4 pt-2">
       {/* Header */}
@@ -175,7 +237,6 @@ export default function OutputScreen() {
           </Text>
         </View>
       </View>
-
       {/* Stats Bar */}
       <View className="flex-row bg-surface rounded-xl p-3 mb-3 border border-border">
         <View className="flex-1 items-center">
@@ -199,7 +260,6 @@ export default function OutputScreen() {
           </Text>
         </View>
       </View>
-
       {/* Download Button - prominent */}
       <TouchableOpacity
         onPress={handleDownload}
@@ -210,10 +270,9 @@ export default function OutputScreen() {
           Download Translated File (.st)
         </Text>
       </TouchableOpacity>
-
       {/* Tabs */}
       <View className="flex-row bg-surface rounded-xl p-1 mb-3 border border-border">
-        {(["output", "diagnostics", "mapping"] as TabName[]).map((tab) => (
+        {(["output", "diagnostics", "labels", "mapping", "fb_defs"] as TabName[]).map((tab) => (
           <TouchableOpacity
             key={tab}
             className={`flex-1 py-2.5 rounded-lg items-center ${activeTab === tab ? "bg-primary" : ""}`}
@@ -223,12 +282,13 @@ export default function OutputScreen() {
             <Text
               className={`text-xs font-semibold capitalize ${activeTab === tab ? "text-background" : "text-muted"}`}
             >
-              {tab === "diagnostics" ? `Diag (${result.diagnostics.length})` : tab}
+              {tab === "diagnostics" ? `Diag (${result.diagnostics.length})`
+                : tab === "fb_defs" ? "FB Defs"
+                : tab}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-
       {/* Tab Content */}
       <View className="flex-1">
         {activeTab === "output" && (
@@ -255,7 +315,6 @@ export default function OutputScreen() {
             </ScrollView>
           </View>
         )}
-
         {activeTab === "diagnostics" && (
           <FlatList
             data={result.diagnostics}
@@ -290,7 +349,6 @@ export default function OutputScreen() {
             contentContainerStyle={{ paddingBottom: 16 }}
           />
         )}
-
         {activeTab === "mapping" && (
           <View className="flex-1">
             <View className="flex-row justify-end mb-2 gap-2">
@@ -316,6 +374,73 @@ export default function OutputScreen() {
                 selectable
               >
                 {result.mappingYaml || "# No device allocations"}
+              </Text>
+            </ScrollView>
+          </View>
+        )}
+        {activeTab === "labels" && (
+          <View className="flex-1">
+            <View className="flex-row justify-end mb-2 gap-2">
+              <TouchableOpacity
+                onPress={handleDownloadLabels}
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
+                activeOpacity={0.7}
+              >
+                <Text className="text-sm text-primary font-medium">Download CSV</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleCopy(result.labelsCsv)}
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
+                activeOpacity={0.7}
+              >
+                <Text className="text-sm text-primary font-medium">Copy</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView className="flex-1 bg-surface rounded-xl border border-border p-4" horizontal>
+              <ScrollView>
+                <Text
+                  className="text-foreground"
+                  style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 11, lineHeight: 16 }}
+                  selectable
+                >
+                  {result.labelsCsv || "Class,Label,DataType,Constant,Comment"}
+                </Text>
+              </ScrollView>
+            </ScrollView>
+          </View>
+        )}
+        {activeTab === "fb_defs" && (
+          <View className="flex-1">
+            <View className="flex-row justify-end mb-2 gap-2 flex-wrap">
+              <TouchableOpacity
+                onPress={handleDownloadFbDefs}
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
+                activeOpacity={0.7}
+              >
+                <Text className="text-sm text-primary font-medium">Download FBs</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleDownloadUdtDefs}
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
+                activeOpacity={0.7}
+              >
+                <Text className="text-sm text-primary font-medium">Download UDTs</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleCopy(result.fbDefinitions)}
+                className="bg-surface px-4 py-2 rounded-lg border border-border"
+                activeOpacity={0.7}
+              >
+                <Text className="text-sm text-primary font-medium">Copy</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView className="flex-1 bg-surface rounded-xl border border-border p-4">
+              <Text
+                className="text-foreground"
+                style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, lineHeight: 18 }}
+                selectable
+              >
+                {result.fbDefinitions || "(* No AOI function blocks extracted *)"}
               </Text>
             </ScrollView>
           </View>

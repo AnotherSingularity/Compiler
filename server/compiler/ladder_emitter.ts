@@ -76,30 +76,10 @@ export function emitRung(ast: RungAst, opts: EmitOptions = {}): EmitResult {
   // Emit each output. Outputs that need to be gated on rung condition get
   // wrapped in IF; outputs that are unconditional (NOP, LBL, etc.) don't.
   const cond = conditionExpr || "TRUE";
-  // Collect all output statements first, then decide how to wrap them.
-  const outStmts: string[] = [];
-  for (const out of outputs) {
-    const stmt = emitOutput(out, cond, ctx, indent);
-    if (stmt) outStmts.push(stmt);
-  }
-  // If everything we emitted is already self-wrapped (e.g., latches that
-  // include their own IF), we don't need an outer IF. Detect by checking
-  // for raw assignments that aren't already inside IF blocks.
-  const needsWrapper = needsConditionWrapper(outputs);
-  if (needsWrapper && cond !== "TRUE") {
-    lines.push(`${indent}IF (${cond}) THEN`);
-    for (const stmt of outStmts) {
-      // Re-indent each emitted line by one level
-      for (const line of stmt.split("\n")) {
-        lines.push(`${indent}  ${line}`);
-      }
-    }
-    lines.push(`${indent}END_IF;`);
-  } else {
-    for (const stmt of outStmts) {
-      lines.push(stmt);
-    }
-  }
+  // Delegate to emitOutputs which handles self-gated/wrapper-gated split,
+  // recurses into Branches, and combines path conditions correctly.
+  const emitted = emitOutputs(outputs, cond, ctx, indent);
+  for (const line of emitted) lines.push(line);
   return {
     st: lines.join("\n"),
     manualPorts: ctx.manualPorts,
@@ -245,18 +225,104 @@ function emitConditionInstruction(node: InstructionNode, ctx: EmitCtx): string {
  * Simpler approach: always wrap; emit OTE as `tag := rung_condition` which
  * is correctly combinational regardless of wrapper. Implemented in emitOutput.
  */
-function needsConditionWrapper(outputs: RungNode[]): boolean {
-  // If the only output type is OTE, no wrapper needed (each OTE is its own
-  // assignment of rung_condition).
-  const onlyOte = outputs.every(o =>
-    o.kind === "Instruction" && o.name === "OTE"
-  );
-  if (onlyOte) return false;
-  // Otherwise, wrap. Inside the wrapper, OTE becomes `tag := TRUE` because
-  // the wrapper already gates on cond being true. We handle FALSE-drive
-  // for OTE outside the wrapper if mixed (TODO; for v1 we accept this
-  // limitation and emit a warning).
-  return true;
+/**
+ * Returns true if the output instruction's emission already encodes the rung
+ * condition itself, producing correct behavior whether cond is true or false.
+ * Self-gated outputs are emitted OUTSIDE any IF wrapper.
+ *
+ *   OTE         → `Y := cond;` (drives FALSE when cond is FALSE — correct)
+ *   TON/TOF/RTO → `T(IN := cond, ...);` (IEC FB tracks IN edges, must run every scan)
+ *   CTU/CTD     → `C(CU := cond, ...);` (same — IEC counter FB)
+ *
+ * Everything else (OTL, OTU, MOV, ADD, JSR, CPT, COP, FLL, etc.) is a state
+ * change that should only fire when cond is true, so it goes inside the IF
+ * wrapper.
+ */
+function isSelfGated(node: RungNode): boolean {
+  if (node.kind !== "Instruction") return false;
+  switch (node.name) {
+    case "OTE":
+    case "TON":
+    case "TOF":
+    case "RTO":
+    case "CTU":
+    case "CTD":
+      return true;
+    default:
+      return false;
+  }
+}
+/**
+ * Emit a list of outputs given a rung condition. Returns the ordered output
+ * lines (already indented). Used by both emitRung at the top level and by
+ * the Branch case in emitOutput for per-path emission.
+ *
+ * Partitions outputs into three categories:
+ *   1. Self-gated instructions (OTE, TON, etc.) — emit unconditionally.
+ *   2. Branches — recurse, combining outer cond with each path's sub-cond.
+ *   3. Wrapper-gated instructions — emit inside `IF (cond) THEN ... END_IF`.
+ *
+ * The split is critical for correctness: timer FBs must run every scan to
+ * track edges, OTE must drive FALSE when cond is FALSE, but state-change
+ * outputs (latches, MOV, JSR) must only fire when cond is true.
+ */
+function emitOutputs(
+  outputs: RungNode[],
+  cond: string,
+  ctx: EmitCtx,
+  indent: string,
+): string[] {
+  const lines: string[] = [];
+  const selfGated: RungNode[] = [];
+  const branches: RungNode[] = [];
+  const wrapperGated: RungNode[] = [];
+  for (const out of outputs) {
+    if (out.kind === "Branch") branches.push(out);
+    else if (isSelfGated(out)) selfGated.push(out);
+    else wrapperGated.push(out);
+  }
+  // 1. Self-gated outputs — emit each unconditionally with the rung cond.
+  for (const out of selfGated) {
+    const stmt = emitOutput(out, cond, ctx, indent);
+    if (stmt) {
+      for (const line of stmt.split("\n")) lines.push(`${indent}${line}`);
+    }
+  }
+  // 2. Branches — each path becomes a sub-emission with combined cond.
+  for (const branch of branches) {
+    if (branch.kind !== "Branch") continue;
+    for (const path of branch.paths) {
+      const sub = splitRung(path, ctx);
+      const combined = sub.conditionExpr
+        ? (cond === "TRUE" ? sub.conditionExpr : `(${cond}) AND (${sub.conditionExpr})`)
+        : cond;
+      if (sub.outputs.length === 0) continue;
+      const sublines = emitOutputs(sub.outputs, combined, ctx, indent);
+      for (const line of sublines) lines.push(line);
+    }
+  }
+  // 3. Wrapper-gated outputs — group inside `IF (cond) THEN ... END_IF`.
+  if (wrapperGated.length > 0) {
+    const wrapperStmts: string[] = [];
+    for (const out of wrapperGated) {
+      const stmt = emitOutput(out, cond, ctx, indent);
+      if (stmt) wrapperStmts.push(stmt);
+    }
+    if (cond !== "TRUE") {
+      lines.push(`${indent}IF (${cond}) THEN`);
+      for (const stmt of wrapperStmts) {
+        for (const line of stmt.split("\n")) {
+          lines.push(`${indent}  ${line}`);
+        }
+      }
+      lines.push(`${indent}END_IF;`);
+    } else {
+      for (const stmt of wrapperStmts) {
+        for (const line of stmt.split("\n")) lines.push(`${indent}${line}`);
+      }
+    }
+  }
+  return lines;
 }
 /** Emit a single output instruction as one or more ST statements. */
 function emitOutput(
@@ -265,40 +331,23 @@ function emitOutput(
   ctx: EmitCtx,
   indent: string,
 ): string {
-  // Branches in output position: each path is its own sub-rung that activates
-  // when the outer condition AND the path's own conditioning are both true.
-  // The CALLER is responsible for gating the outer condition (via the IF
-  // wrapper in emitRung or via the surrounding emit context). Each path
-  // only adds its own additional condition if it has sub-conditioning.
+  // Branches in output position: each path is its own sub-emission with
+  // combined cond (outer cond AND path's own conditioning). emitOutputs
+  // applies the self-gated/wrapper-gated split per path — so a TON inside
+  // a branch path still emits unconditionally, an OTL stays wrapped, etc.
+  // This is recursive: the per-path emitOutputs may itself encounter more
+  // Branches and recurse further.
   if (node.kind === "Branch") {
     const parts: string[] = [];
     for (const path of node.paths) {
       const sub = splitRung(path, ctx);
-      // combinedCond is needed for sub-outputs that take a runtime condition
-      // (timers, counters), but is NOT used for the IF wrapper here.
       const combinedCond = sub.conditionExpr
         ? (cond === "TRUE" ? sub.conditionExpr : `(${cond}) AND (${sub.conditionExpr})`)
         : cond;
       if (sub.outputs.length === 0) continue;
-      const subStmts: string[] = [];
-      for (const out of sub.outputs) {
-        const stmt = emitOutput(out, combinedCond, ctx, indent);
-        if (stmt) subStmts.push(stmt);
-      }
-      if (subStmts.length === 0) continue;
-      // Only wrap if this path has its OWN additional condition beyond
-      // the outer rung condition. The caller's IF wrapper handles outer cond.
-      if (sub.conditionExpr) {
-        parts.push(`IF (${sub.conditionExpr}) THEN`);
-        for (const stmt of subStmts) {
-          for (const line of stmt.split("\n")) parts.push(`  ${line}`);
-        }
-        parts.push(`END_IF;`);
-      } else {
-        // Path has no own conditioning — inline its outputs unwrapped.
-        // The caller's wrapper (or absence thereof) handles outer cond.
-        parts.push(subStmts.join("\n"));
-      }
+      const sublines = emitOutputs(sub.outputs, combinedCond, ctx, "");
+      if (sublines.length === 0) continue;
+      parts.push(sublines.join("\n"));
     }
     return parts.join("\n");
   }

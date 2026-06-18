@@ -9,6 +9,9 @@ import { parseSTSource } from "./compiler/parser";
 import { emitMEL } from "./compiler/emitter";
 import { emitAB } from "./compiler/emitter-ab";
 import { looksLikeL5K, extractL5K, joinExtractedRoutines } from "./compiler/l5k_extract";
+import { emitLabelsCsv, emitUdtSummary } from "./compiler/labels_emitter";
+import { emitIoMapYaml } from "./compiler/module_emitter";
+import { emitAoiAsFb, groupRoutinesByAoi } from "./compiler/aoi_emitter";
 export interface Diagnostic {
   severity: "INFO" | "WARN" | "MANUAL_PORT" | "ERROR";
   code: string;
@@ -31,6 +34,10 @@ export interface TranslationResult {
   diagnostics: Diagnostic[];
   mappingYaml: string;
   labelsCsv: string;
+  /** ST FUNCTION_BLOCK definitions for AOIs extracted from L5K (Phase 2). */
+  fbDefinitions: string;
+  /** UDT (Structured Data Type) definitions from L5K (Phase 2). */
+  udtDefinitions: string;
   failureReport: FailureReport | null;
   stats: {
     inputLines: number;
@@ -132,6 +139,8 @@ export function translate(
       diagnostics,
       mappingYaml: "allocations: {}\n",
       labelsCsv: "Class,Label,DataType,Device,Comment",
+      fbDefinitions: "",
+      udtDefinitions: "",
       failureReport: report,
       stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
     };
@@ -177,6 +186,8 @@ export function translate(
         diagnostics: [...diagnostics, ...result.diagnostics],
         mappingYaml: result.mappingYaml,
         labelsCsv: result.labelsCsv,
+        fbDefinitions: "",
+        udtDefinitions: "",
         failureReport,
         stats: {
           inputLines,
@@ -210,6 +221,8 @@ export function translate(
         diagnostics: result.diagnostics,
         mappingYaml: result.mappingYaml,
         labelsCsv: result.labelsCsv,
+        fbDefinitions: "",
+        udtDefinitions: "",
         failureReport,
         stats: {
           inputLines,
@@ -244,6 +257,8 @@ export function translate(
       diagnostics,
       mappingYaml: "allocations: {}\n",
       labelsCsv: "Class,Label,DataType,Device,Comment",
+      fbDefinitions: "",
+      udtDefinitions: "",
       failureReport: report,
       stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
     };
@@ -293,6 +308,8 @@ function translateL5K(
       ],
       mappingYaml: "allocations: {}\n",
       labelsCsv: "Class,Label,DataType,Device,Comment",
+      fbDefinitions: "",
+      udtDefinitions: "",
       failureReport: {
         stage: "l5k_extract",
         error: "L5K contains no routines",
@@ -310,12 +327,20 @@ function translateL5K(
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { emitLadderRoutine } = require("./compiler/ladder_emitter");
   const outChunks: string[] = [];
-  const totalRoutines = extracted.stRoutines.length + extracted.ladderRoutines.length;
   outChunks.push(
-    `(* L5K extraction: ${totalRoutines} routine(s) from controller "${extracted.controllerName ?? "<unknown>"}" (IE_VER ${extracted.ieVer ?? "?"}) *)`,
+    `(* L5K extraction from controller "${extracted.controllerName ?? "<unknown>"}" (IE_VER ${extracted.ieVer ?? "?"}) *)`,
   );
   outChunks.push(
-    `(*   ${extracted.stRoutines.length} ST routine(s) + ${extracted.ladderRoutines.length} ladder routine(s) translated to MEL ST *)`,
+    `(*   ${extracted.stRoutines.length} ST routine(s) + ${extracted.ladderRoutines.length} ladder routine(s) *)`,
+  );
+  outChunks.push(
+    `(*   ${extracted.aois.length} AOI(s) → emitted as FUNCTION_BLOCK definitions (see FB tab) *)`,
+  );
+  outChunks.push(
+    `(*   ${extracted.tags.length} controller tag(s) → labels CSV (see Labels tab) *)`,
+  );
+  outChunks.push(
+    `(*   ${extracted.modules.length} IO module(s) → mapping YAML (see Mapping tab) *)`,
   );
   outChunks.push("");
   let translatedNodes = 0;
@@ -325,31 +350,28 @@ function translateL5K(
   let ladderRungsTotal = 0;
   let ladderRungsFailed = 0;
   const manualPortSet = new Set<string>();
-  // ─── ST routines through the full ST→MEL pipeline ──────────────────
+  // Per-routine translated body. Key format: `<KIND>:<PARENT>/<NAME>` where
+  // KIND is "AOI" / "PROGRAM" / "TASK" / "TOPLEVEL".
+  const routineBodies = new Map<string, string>();
+  const keyFor = (parentKind: string | null, parentName: string, name: string) =>
+    `${parentKind ?? "TOPLEVEL"}:${parentName}/${name}`;
+  // ─── Translate every ST routine, store body in routineBodies ───────
   for (const r of extracted.stRoutines) {
-    const parent = r.parentKind
-      ? `${r.parentKind.toLowerCase()} ${r.parentName}`
-      : "<top-level>";
-    outChunks.push(
-      `(* ── ST_ROUTINE ${r.name} in ${parent} (L5K line ${r.sourceStartLine}) ── *)`,
-    );
+    const parent = r.parentKind ? `${r.parentKind.toLowerCase()} ${r.parentName}` : "<top-level>";
     try {
       const ast = parseSTSource(r.source);
       const lines = r.source.split("\n");
       const result = emitMEL(ast, `<L5K:${parent}/${r.name}>`, lines);
-      outChunks.push(result.output);
+      routineBodies.set(keyFor(r.parentKind, r.parentName, r.name), result.output);
       translatedNodes += result.translatedNodes;
       for (const d of result.diagnostics) {
-        // Re-emit diagnostics with a routine-prefix so the user can locate them
-        diagnostics.push({
-          ...d,
-          message: `[${parent}/${r.name}] ${d.message}`,
-        });
+        diagnostics.push({ ...d, message: `[${parent}/${r.name}] ${d.message}` });
         if (d.severity === "MANUAL_PORT") manualPortSet.add("st_manual_port");
       }
       stRoutinesOk++;
     } catch (err: any) {
-      outChunks.push(`(* Parse failed for ${parent}/${r.name}: ${err.message} *)`);
+      routineBodies.set(keyFor(r.parentKind, r.parentName, r.name),
+        `(* Parse failed for ${parent}/${r.name}: ${err.message} *)`);
       stRoutinesFailed++;
       diagnostics.push({
         severity: "ERROR",
@@ -358,25 +380,17 @@ function translateL5K(
         line: r.sourceStartLine,
       });
     }
-    outChunks.push("");
   }
-  // ─── Ladder routines through the ladder emitter ────────────────────
+  // ─── Translate every ladder routine, store body in routineBodies ───
   for (const r of extracted.ladderRoutines) {
-    const parent = r.parentKind
-      ? `${r.parentKind.toLowerCase()} ${r.parentName}`
-      : "<top-level>";
-    outChunks.push(
-      `(* ── ROUTINE ${r.name} (ladder→ST) in ${parent} (L5K line ${r.sourceStartLine}, ${r.ruleCount} rungs) ── *)`,
-    );
+    const parent = r.parentKind ? `${r.parentKind.toLowerCase()} ${r.parentName}` : "<top-level>";
     if (r.rungs.length === 0) {
-      outChunks.push("(* empty routine *)");
-      outChunks.push("");
+      routineBodies.set(keyFor(r.parentKind, r.parentName, r.name), "(* empty routine *)");
       ladderRoutinesOk++;
       continue;
     }
     const ladderOut = emitLadderRoutine(r.rungs);
-    outChunks.push(ladderOut.st);
-    outChunks.push("");
+    routineBodies.set(keyFor(r.parentKind, r.parentName, r.name), ladderOut.st);
     ladderRoutinesOk++;
     ladderRungsTotal += ladderOut.rungCount;
     ladderRungsFailed += ladderOut.failedRungCount;
@@ -390,6 +404,47 @@ function translateL5K(
         line: r.sourceStartLine,
       });
     }
+  }
+  // ─── Main output: PROGRAM/TASK/top-level routines ──────────────────
+  // AOI routines are emitted in fbDefinitions, not here.
+  const emitRoutineInMain = (parentKind: string | null, parentName: string, name: string,
+                              kindLabel: string, sourceStartLine: number, ruleCount?: number) => {
+    const parent = parentKind ? `${parentKind.toLowerCase()} ${parentName}` : "<top-level>";
+    const suffix = ruleCount !== undefined ? `, ${ruleCount} rungs` : "";
+    outChunks.push(`(* ── ${kindLabel} ${name} in ${parent} (L5K line ${sourceStartLine}${suffix}) ── *)`);
+    const body = routineBodies.get(keyFor(parentKind, parentName, name)) ?? "(* missing *)";
+    outChunks.push(body);
+    outChunks.push("");
+  };
+  for (const r of extracted.stRoutines) {
+    if (r.parentKind === "AOI") continue;
+    emitRoutineInMain(r.parentKind, r.parentName, r.name, "ST_ROUTINE", r.sourceStartLine);
+  }
+  for (const r of extracted.ladderRoutines) {
+    if (r.parentKind === "AOI") continue;
+    emitRoutineInMain(r.parentKind, r.parentName, r.name, "ROUTINE (ladder→ST)", r.sourceStartLine, r.ruleCount);
+  }
+  // ─── FB definitions: wrap AOIs ─────────────────────────────────────
+  const fbChunks: string[] = [];
+  fbChunks.push(`(* AOI → FUNCTION_BLOCK definitions extracted from L5K *)`);
+  fbChunks.push(`(*   Controller: ${extracted.controllerName ?? "<unknown>"}, ${extracted.aois.length} AOI(s) *)`);
+  fbChunks.push("");
+  const aoiGroups = groupRoutinesByAoi(extracted.stRoutines, extracted.ladderRoutines);
+  for (const aoi of extracted.aois) {
+    const group = aoiGroups.get(aoi.name);
+    const bodies = new Map<string, string>();
+    if (group) {
+      for (const r of group.st) {
+        const b = routineBodies.get(keyFor("AOI", aoi.name, r.name));
+        if (b) bodies.set(r.name, b);
+      }
+      for (const r of group.ladder) {
+        const b = routineBodies.get(keyFor("AOI", aoi.name, r.name));
+        if (b) bodies.set(r.name, b);
+      }
+    }
+    fbChunks.push(emitAoiAsFb(aoi, bodies));
+    fbChunks.push("");
   }
   // ─── Coverage summary ──────────────────────────────────────────────
   diagnostics.unshift({
@@ -407,6 +462,10 @@ function translateL5K(
     });
   }
   const output = outChunks.join("\n");
+  const fbDefinitions = fbChunks.join("\n");
+  const labelsCsv = emitLabelsCsv(extracted.tags, extracted.dataTypes);
+  const mappingYaml = emitIoMapYaml(extracted.modules, extracted.ieVer, extracted.controllerName);
+  const udtDefinitions = emitUdtSummary(extracted.dataTypes);
   const outputLines = output.split("\n").length;
   const warningCount = diagnostics.filter(d => d.severity === "WARN").length;
   const manualPortCount = diagnostics.filter(d => d.severity === "MANUAL_PORT").length + manualPortSet.size;
@@ -415,8 +474,10 @@ function translateL5K(
     ok: errorCount === 0,
     output,
     diagnostics,
-    mappingYaml: "allocations: {}\n",
-    labelsCsv: "Class,Label,DataType,Device,Comment",
+    mappingYaml,
+    labelsCsv,
+    fbDefinitions,
+    udtDefinitions,
     failureReport: errorCount > 0 ? {
       stage: "l5k_translate",
       error: `${errorCount} error(s) during L5K translation`,

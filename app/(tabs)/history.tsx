@@ -10,9 +10,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import { ScreenContainer } from "@/components/screen-container";
-
 interface HistoryEntry {
   id: string;
   direction: "ab2mel" | "mel2ab";
@@ -25,26 +23,25 @@ interface HistoryEntry {
   output: string;
   diagnostics: any[];
   mappingYaml?: string;
+  labelsCsv?: string;
+  fbDefinitions?: string;
+  udtDefinitions?: string;
   ok: boolean;
 }
-
 export default function HistoryScreen() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const router = useRouter();
-
   useFocusEffect(
     useCallback(() => {
       loadHistory();
     }, [])
   );
-
   const loadHistory = async () => {
     const data = await AsyncStorage.getItem("translation_history");
     if (data) {
       setHistory(JSON.parse(data));
     }
   };
-
   const handleViewEntry = async (entry: HistoryEntry) => {
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -57,7 +54,9 @@ export default function HistoryScreen() {
         output: entry.output,
         diagnostics: entry.diagnostics,
         mappingYaml: entry.mappingYaml || "allocations: {}\n",
-        labelsCsv: "",
+        labelsCsv: entry.labelsCsv || "",
+        fbDefinitions: entry.fbDefinitions || "",
+        udtDefinitions: entry.udtDefinitions || "",
         stats: {
           inputLines: entry.inputLines,
           outputLines: entry.outputLines,
@@ -68,7 +67,6 @@ export default function HistoryScreen() {
     );
     router.push("/output" as any);
   };
-
   const handleDeleteEntry = (id: string) => {
     Alert.alert("Delete Translation", "Remove this entry from history?", [
       { text: "Cancel", style: "cancel" },
@@ -86,7 +84,6 @@ export default function HistoryScreen() {
       },
     ]);
   };
-
   const handleClearAll = () => {
     Alert.alert("Clear History", "Delete all translation history?", [
       { text: "Cancel", style: "cancel" },
@@ -100,7 +97,6 @@ export default function HistoryScreen() {
       },
     ]);
   };
-
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleDateString(undefined, {
@@ -110,7 +106,6 @@ export default function HistoryScreen() {
       minute: "2-digit",
     });
   };
-
   return (
     <ScreenContainer className="px-4 pt-2">
       {/* Header */}
@@ -122,7 +117,6 @@ export default function HistoryScreen() {
           </TouchableOpacity>
         )}
       </View>
-
       <FlatList
         data={history}
         keyExtractor={(item) => item.id}
