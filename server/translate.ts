@@ -1,23 +1,20 @@
 /**
  * AB↔MEL Structured Text Translation — Pipeline Entry Point
- * 
+ *
  * Pipeline stages wrapped in try/catch. On exception, produces a structured
  * failure report rather than HTTP 500.
  */
-
 import { z } from "zod";
 import { parseSTSource } from "./compiler/parser";
 import { emitMEL } from "./compiler/emitter";
 import { emitAB } from "./compiler/emitter-ab";
 import { looksLikeL5K, extractL5K, joinExtractedRoutines } from "./compiler/l5k_extract";
-
 export interface Diagnostic {
   severity: "INFO" | "WARN" | "MANUAL_PORT" | "ERROR";
   code: string;
   message: string;
   line: number;
 }
-
 export interface FailureReport {
   stage: string;
   error: string;
@@ -28,7 +25,6 @@ export interface FailureReport {
   direction: string;
   inputLines: number;
 }
-
 export interface TranslationResult {
   ok: boolean;
   output: string;
@@ -44,7 +40,6 @@ export interface TranslationResult {
     translatedNodes: number;
   };
 }
-
 function buildSourceContext(source: string, errorLine: number): string {
   const lines = source.split("\n");
   const start = Math.max(0, errorLine - 4);
@@ -57,7 +52,6 @@ function buildSourceContext(source: string, errorLine: number): string {
   }
   return contextLines.join("\n");
 }
-
 function extractErrorLine(error: Error, source: string): number {
   // Try to extract line number from error message
   const lineMatch = error.message.match(/line (\d+)/i);
@@ -71,29 +65,22 @@ function extractErrorLine(error: Error, source: string): number {
   }
   return 1;
 }
-
 function formatFailureReport(report: FailureReport): string {
   return `=== FAILURE REPORT ===
 timestamp: ${report.timestamp}
 direction: ${report.direction}
 stage: ${report.stage}
 input_lines: ${report.inputLines}
-
 --- ERROR ---
 ${report.error}
-
 --- TRACEBACK ---
 ${report.traceback}
-
 --- SOURCE CONTEXT ---
 ${report.sourceContext}
-
 --- PIPELINE STATE ---
 ${report.pipelineState}
-
 === END REPORT ===`;
 }
-
 export function translate(
   source: string,
   direction: "ab2mel" | "mel2ab",
@@ -101,61 +88,22 @@ export function translate(
 ): TranslationResult {
   const diagnostics: Diagnostic[] = [];
   const timestamp = new Date().toISOString();
-
   // ── L5K pre-extraction ────────────────────────────────────────────────
-  // Studio 5000 L5K exports are not raw ST — they wrap controller config,
-  // tags, programs, and AOIs in a Pascal-flavored DSL with ST routines
-  // buried in `ST_ROUTINE ... END_ST_ROUTINE` blocks. Detect L5K input and
-  // extract the ST source before handing off to the parser.
+  // L5K exports route through a separate path: extract routines, then
+  // process each routine independently. ST routines flow through the
+  // standard ST→MEL pipeline; ladder routines go through the ladder
+  // emitter which already produces MEL-compatible ST. Re-parsing
+  // ladder-emitted ST through the strict ST parser is unnecessary and
+  // causes failures on edge cases the ST parser doesn't handle.
   if (direction === "ab2mel" && looksLikeL5K(source)) {
-    const extracted = extractL5K(source);
-    if (extracted.stRoutines.length === 0) {
-      const inputLines = source.split("\n").length;
-      return {
-        ok: false,
-        output: "",
-        diagnostics: [
-          {
-            severity: "ERROR",
-            code: "AB_MEL_L5K_001",
-            message: `L5K file recognized (controller: ${extracted.controllerName ?? "<unknown>"}, IE_VER ${extracted.ieVer ?? "?"}) but contains no ST_ROUTINE blocks. Found ${extracted.ladderRoutines.length} ladder routine(s) — those are RLL, not Structured Text. Convert ladder to ST in Studio 5000 first, or paste a routine that's already ST.`,
-            line: 1,
-          },
-        ],
-        mappingYaml: "allocations: {}\n",
-        labelsCsv: "Class,Label,DataType,Device,Comment",
-        failureReport: {
-          stage: "l5k_extract",
-          error: "L5K contains no ST routines",
-          traceback: `Found ${extracted.ladderRoutines.length} RLL routines; 0 ST routines`,
-          sourceContext: source.split("\n").slice(0, 8).join("\n"),
-          pipelineState: `L5K detected, no ST extractable`,
-          timestamp,
-          direction,
-          inputLines,
-        },
-        stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
-      };
-    }
-    // Replace source with joined ST routines and continue. Diagnostics
-    // about the extraction itself get prepended.
-    source = joinExtractedRoutines(extracted);
-    diagnostics.push({
-      severity: "INFO",
-      code: "AB_MEL_L5K_002",
-      message: `L5K extracted: ${extracted.stRoutines.length} ST routine(s) from controller "${extracted.controllerName ?? "<unknown>"}". ${extracted.ladderRoutines.length} ladder routine(s) skipped (RLL, not ST).`,
-      line: 1,
-    });
+    return translateL5K(source, timestamp, direction, options);
   }
-
   const sourceLines = source.split("\n");
   const inputLines = sourceLines.length;
   const sourceFile = "<input>";
-
   // Pipeline state tracking
   let currentStage = "init";
   let ast: any = null;
-
   // === Stage: parse ===
   currentStage = "parser";
   try {
@@ -188,7 +136,6 @@ export function translate(
       stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
     };
   }
-
   // === Stage: emit (includes cst_to_ir, typecheck, lower_*, allocate_memory, emit_mel/emit_ab) ===
   currentStage = direction === "ab2mel" ? "emit_mel" : "emit_ab";
   try {
@@ -302,13 +249,190 @@ export function translate(
     };
   }
 }
-
 // Export the formatter for use in the UI
 export { formatFailureReport };
-
 export const translateInputSchema = z.object({
   direction: z.enum(["ab2mel", "mel2ab"]),
   source: z.string().min(1, "Source code is required"),
   options: z.object({ memoryMap: z.string().optional(), labelsCsv: z.string().optional() }).optional(),
 });
 export type TranslateInput = z.infer<typeof translateInputSchema>;
+/**
+ * L5K-specific translation path. Splits ST routines and ladder routines into
+ * separate processing streams, then concatenates outputs.
+ *
+ * ST routines run through the full ST→MEL pipeline (parser + emitter) so
+ * they get proper instruction rewrites (ABS→ABS, COP→BMOV, etc.).
+ *
+ * Ladder routines run through the ladder emitter only, which produces
+ * MEL-compatible ST directly. Re-parsing ladder-emitted ST through the
+ * strict ST parser is avoided because the ladder emitter sometimes
+ * produces constructs the ST parser doesn't (yet) handle, and the
+ * ladder emitter already targets MEL conventions.
+ */
+function translateL5K(
+  source: string,
+  timestamp: string,
+  direction: "ab2mel" | "mel2ab",
+  _options?: { memoryMap?: string; labelsCsv?: string }
+): TranslationResult {
+  const inputLines = source.split("\n").length;
+  const diagnostics: Diagnostic[] = [];
+  const extracted = extractL5K(source);
+  if (extracted.stRoutines.length === 0 && extracted.ladderRoutines.length === 0) {
+    return {
+      ok: false,
+      output: "",
+      diagnostics: [
+        {
+          severity: "ERROR",
+          code: "AB_MEL_L5K_001",
+          message: `L5K file recognized (controller: ${extracted.controllerName ?? "<unknown>"}, IE_VER ${extracted.ieVer ?? "?"}) but contains no translatable routines.`,
+          line: 1,
+        },
+      ],
+      mappingYaml: "allocations: {}\n",
+      labelsCsv: "Class,Label,DataType,Device,Comment",
+      failureReport: {
+        stage: "l5k_extract",
+        error: "L5K contains no routines",
+        traceback: "",
+        sourceContext: source.split("\n").slice(0, 8).join("\n"),
+        pipelineState: `L5K detected, no routines extractable`,
+        timestamp,
+        direction,
+        inputLines,
+      },
+      stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
+    };
+  }
+  // Lazy-import to avoid pulling ladder_emitter unless we need it
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { emitLadderRoutine } = require("./compiler/ladder_emitter");
+  const outChunks: string[] = [];
+  const totalRoutines = extracted.stRoutines.length + extracted.ladderRoutines.length;
+  outChunks.push(
+    `(* L5K extraction: ${totalRoutines} routine(s) from controller "${extracted.controllerName ?? "<unknown>"}" (IE_VER ${extracted.ieVer ?? "?"}) *)`,
+  );
+  outChunks.push(
+    `(*   ${extracted.stRoutines.length} ST routine(s) + ${extracted.ladderRoutines.length} ladder routine(s) translated to MEL ST *)`,
+  );
+  outChunks.push("");
+  let translatedNodes = 0;
+  let stRoutinesOk = 0;
+  let stRoutinesFailed = 0;
+  let ladderRoutinesOk = 0;
+  let ladderRungsTotal = 0;
+  let ladderRungsFailed = 0;
+  const manualPortSet = new Set<string>();
+  // ─── ST routines through the full ST→MEL pipeline ──────────────────
+  for (const r of extracted.stRoutines) {
+    const parent = r.parentKind
+      ? `${r.parentKind.toLowerCase()} ${r.parentName}`
+      : "<top-level>";
+    outChunks.push(
+      `(* ── ST_ROUTINE ${r.name} in ${parent} (L5K line ${r.sourceStartLine}) ── *)`,
+    );
+    try {
+      const ast = parseSTSource(r.source);
+      const lines = r.source.split("\n");
+      const result = emitMEL(ast, `<L5K:${parent}/${r.name}>`, lines);
+      outChunks.push(result.output);
+      translatedNodes += result.translatedNodes;
+      for (const d of result.diagnostics) {
+        // Re-emit diagnostics with a routine-prefix so the user can locate them
+        diagnostics.push({
+          ...d,
+          message: `[${parent}/${r.name}] ${d.message}`,
+        });
+        if (d.severity === "MANUAL_PORT") manualPortSet.add("st_manual_port");
+      }
+      stRoutinesOk++;
+    } catch (err: any) {
+      outChunks.push(`(* Parse failed for ${parent}/${r.name}: ${err.message} *)`);
+      stRoutinesFailed++;
+      diagnostics.push({
+        severity: "ERROR",
+        code: "AB_MEL_L5K_ST_001",
+        message: `ST routine ${parent}/${r.name} failed to parse: ${err.message}`,
+        line: r.sourceStartLine,
+      });
+    }
+    outChunks.push("");
+  }
+  // ─── Ladder routines through the ladder emitter ────────────────────
+  for (const r of extracted.ladderRoutines) {
+    const parent = r.parentKind
+      ? `${r.parentKind.toLowerCase()} ${r.parentName}`
+      : "<top-level>";
+    outChunks.push(
+      `(* ── ROUTINE ${r.name} (ladder→ST) in ${parent} (L5K line ${r.sourceStartLine}, ${r.ruleCount} rungs) ── *)`,
+    );
+    if (r.rungs.length === 0) {
+      outChunks.push("(* empty routine *)");
+      outChunks.push("");
+      ladderRoutinesOk++;
+      continue;
+    }
+    const ladderOut = emitLadderRoutine(r.rungs);
+    outChunks.push(ladderOut.st);
+    outChunks.push("");
+    ladderRoutinesOk++;
+    ladderRungsTotal += ladderOut.rungCount;
+    ladderRungsFailed += ladderOut.failedRungCount;
+    translatedNodes += (ladderOut.rungCount - ladderOut.failedRungCount);
+    for (const mp of ladderOut.manualPortInstructions) manualPortSet.add(mp);
+    if (ladderOut.warnings.length > 0) {
+      diagnostics.push({
+        severity: "WARN",
+        code: "AB_MEL_LADDER_WARN",
+        message: `${parent}/${r.name}: ${ladderOut.warnings.length} warning(s) — ${ladderOut.warnings[0]}`,
+        line: r.sourceStartLine,
+      });
+    }
+  }
+  // ─── Coverage summary ──────────────────────────────────────────────
+  diagnostics.unshift({
+    severity: "INFO",
+    code: "AB_MEL_L5K_002",
+    message: `L5K extracted: ${stRoutinesOk}/${extracted.stRoutines.length} ST routines + ${ladderRoutinesOk}/${extracted.ladderRoutines.length} ladder routines translated (${ladderRungsTotal} rungs, ${ladderRungsFailed} rung parse failures) from controller "${extracted.controllerName ?? "<unknown>"}".`,
+    line: 1,
+  });
+  if (manualPortSet.size > 0) {
+    diagnostics.push({
+      severity: "INFO",
+      code: "AB_MEL_L5K_004",
+      message: `Unsupported/manual-port instructions found: ${Array.from(manualPortSet).filter(s => s !== "st_manual_port").sort().join(", ")}`,
+      line: 1,
+    });
+  }
+  const output = outChunks.join("\n");
+  const outputLines = output.split("\n").length;
+  const warningCount = diagnostics.filter(d => d.severity === "WARN").length;
+  const manualPortCount = diagnostics.filter(d => d.severity === "MANUAL_PORT").length + manualPortSet.size;
+  const errorCount = diagnostics.filter(d => d.severity === "ERROR").length;
+  return {
+    ok: errorCount === 0,
+    output,
+    diagnostics,
+    mappingYaml: "allocations: {}\n",
+    labelsCsv: "Class,Label,DataType,Device,Comment",
+    failureReport: errorCount > 0 ? {
+      stage: "l5k_translate",
+      error: `${errorCount} error(s) during L5K translation`,
+      traceback: diagnostics.filter(d => d.severity === "ERROR").map(d => d.message).join("\n"),
+      sourceContext: "",
+      pipelineState: `${stRoutinesOk} ST routines OK, ${stRoutinesFailed} ST failed, ${ladderRoutinesOk} ladder routines OK`,
+      timestamp,
+      direction,
+      inputLines,
+    } : null,
+    stats: {
+      inputLines,
+      outputLines,
+      warningCount,
+      manualPortCount,
+      translatedNodes,
+    },
+  };
+}

@@ -2,7 +2,6 @@
  * IEC 61131-3 Structured Text Parser
  * Tokenizer + Recursive Descent → AST
  */
-
 // === Token Types ===
 export type TokenType =
   | "IDENT" | "NUMBER" | "REAL" | "STRING" | "TIME_LITERAL"
@@ -20,14 +19,12 @@ export type TokenType =
   | "FUNCTION_BLOCK" | "END_FUNCTION_BLOCK" | "FUNCTION" | "END_FUNCTION"
   | "PROGRAM" | "END_PROGRAM" | "RETURN" | "EXIT"
   | "DOTDOT" | "COMMENT" | "LINE_COMMENT" | "EOF";
-
 export interface Token {
   type: TokenType;
   value: string;
   line: number;
   col: number;
 }
-
 // === Keywords ===
 const KEYWORDS: Record<string, TokenType> = {
   IF: "IF", THEN: "THEN", ELSIF: "ELSIF", ELSE: "ELSE", END_IF: "END_IF",
@@ -44,14 +41,12 @@ const KEYWORDS: Record<string, TokenType> = {
   PROGRAM: "PROGRAM", END_PROGRAM: "END_PROGRAM",
   RETURN: "RETURN", EXIT: "EXIT",
 };
-
 // === Tokenizer ===
 export function tokenize(source: string): Token[] {
   const tokens: Token[] = [];
   let pos = 0;
   let line = 1;
   let col = 1;
-
   while (pos < source.length) {
     // Whitespace
     if (/\s/.test(source[pos])) {
@@ -59,7 +54,6 @@ export function tokenize(source: string): Token[] {
       pos++;
       continue;
     }
-
     // Block comment (* ... *)
     if (source[pos] === "(" && source[pos + 1] === "*") {
       const start = pos;
@@ -74,7 +68,6 @@ export function tokenize(source: string): Token[] {
       tokens.push({ type: "COMMENT", value: source.slice(start, pos), line: startLine, col: startCol });
       continue;
     }
-
     // Line comment //
     if (source[pos] === "/" && source[pos + 1] === "/") {
       const start = pos;
@@ -83,7 +76,6 @@ export function tokenize(source: string): Token[] {
       tokens.push({ type: "LINE_COMMENT", value: source.slice(start, pos), line, col: startCol });
       continue;
     }
-
     // Time literal T#...
     if ((source[pos] === "T" || source[pos] === "t") && source[pos + 1] === "#") {
       const start = pos;
@@ -93,22 +85,22 @@ export function tokenize(source: string): Token[] {
       tokens.push({ type: "TIME_LITERAL", value: source.slice(start, pos), line, col: startCol });
       continue;
     }
-
-    // Number (integer or real)
+    // Number (integer or real). IEC 61131-3 allows underscore digit
+    // separators inside numeric literals: 1_000, 16#FFFF_FFFF, 2#0001_0010.
     if (/[0-9]/.test(source[pos]) || (source[pos] === "1" && source[pos + 1] === "6" && source[pos + 2] === "#")) {
       const start = pos;
       const startCol = col;
-      // Hex: 16#FF
+      // Hex: 16#FF, binary: 2#01, octal: 8#77
       if (source.slice(pos, pos + 3).match(/^(16|8|2)#/)) {
         pos += 3; col += 3;
-        while (pos < source.length && /[0-9A-Fa-f]/.test(source[pos])) { pos++; col++; }
+        while (pos < source.length && /[0-9A-Fa-f_]/.test(source[pos])) { pos++; col++; }
         tokens.push({ type: "NUMBER", value: source.slice(start, pos), line, col: startCol });
         continue;
       }
-      while (pos < source.length && /[0-9]/.test(source[pos])) { pos++; col++; }
+      while (pos < source.length && /[0-9_]/.test(source[pos])) { pos++; col++; }
       if (pos < source.length && source[pos] === "." && /[0-9]/.test(source[pos + 1])) {
         pos++; col++;
-        while (pos < source.length && /[0-9]/.test(source[pos])) { pos++; col++; }
+        while (pos < source.length && /[0-9_]/.test(source[pos])) { pos++; col++; }
         if (pos < source.length && /[eE]/.test(source[pos])) {
           pos++; col++;
           if (pos < source.length && /[+-]/.test(source[pos])) { pos++; col++; }
@@ -120,7 +112,6 @@ export function tokenize(source: string): Token[] {
       }
       continue;
     }
-
     // String literal — IEC standard uses single quotes, but Allen-Bradley
     // L5K exports and certain Mitsubishi dialects use double quotes. Accept
     // both. Backslash escapes inside the string are passed through opaquely
@@ -143,7 +134,6 @@ export function tokenize(source: string): Token[] {
       tokens.push({ type: "STRING", value: source.slice(start, pos), line, col: startCol });
       continue;
     }
-
     // Identifier or keyword
     if (/[a-zA-Z_]/.test(source[pos])) {
       const start = pos;
@@ -167,19 +157,16 @@ export function tokenize(source: string): Token[] {
       tokens.push({ type: kwType || "IDENT", value, line, col: startCol });
       continue;
     }
-
     // Operators and punctuation
     const startCol = col;
     const ch = source[pos];
     const ch2 = source.slice(pos, pos + 2);
-
     if (ch2 === ":=") { tokens.push({ type: "ASSIGN", value: ":=", line, col: startCol }); pos += 2; col += 2; continue; }
     if (ch2 === "<>") { tokens.push({ type: "NE", value: "<>", line, col: startCol }); pos += 2; col += 2; continue; }
     if (ch2 === "<=") { tokens.push({ type: "LE", value: "<=", line, col: startCol }); pos += 2; col += 2; continue; }
     if (ch2 === ">=") { tokens.push({ type: "GE", value: ">=", line, col: startCol }); pos += 2; col += 2; continue; }
     if (ch2 === "**") { tokens.push({ type: "POWER", value: "**", line, col: startCol }); pos += 2; col += 2; continue; }
     if (ch2 === "..") { tokens.push({ type: "DOTDOT", value: "..", line, col: startCol }); pos += 2; col += 2; continue; }
-
     switch (ch) {
       case ";": tokens.push({ type: "SEMI", value: ";", line, col: startCol }); break;
       case ":": tokens.push({ type: "COLON", value: ":", line, col: startCol }); break;
@@ -204,11 +191,9 @@ export function tokenize(source: string): Token[] {
     }
     pos++; col++;
   }
-
   tokens.push({ type: "EOF", value: "", line, col });
   return tokens;
 }
-
 // === AST Node Types ===
 export type ASTNode =
   | ProgramNode | VarBlockNode | VarDeclNode
@@ -218,7 +203,6 @@ export type ASTNode =
   | IdentNode | LiteralNode | MemberAccessNode | BitAccessNode
   | IndexNode | FunctionCallNode | TypeCastNode
   | CommentNode | BlockNode;
-
 export interface ProgramNode { kind: "program"; name: string; varBlocks: VarBlockNode[]; body: ASTNode[]; line: number; }
 export interface VarBlockNode { kind: "var_block"; scope: string; decls: VarDeclNode[]; line: number; }
 export interface VarDeclNode { kind: "var_decl"; name: string; type: string; initial: ASTNode | null; line: number; }
@@ -245,16 +229,13 @@ export interface FunctionCallNode { kind: "function_call"; name: string; args: A
 export interface TypeCastNode { kind: "type_cast"; targetType: string; expr: ASTNode; line: number; }
 export interface CommentNode { kind: "comment"; text: string; isBlock: boolean; line: number; }
 export interface BlockNode { kind: "block"; statements: ASTNode[]; line: number; }
-
 // === Parser ===
 export class Parser {
   private tokens: Token[];
   private pos = 0;
-
   constructor(tokens: Token[]) {
     this.tokens = tokens;
   }
-
   private peek(): Token { return this.tokens[this.pos] || { type: "EOF", value: "", line: 0, col: 0 }; }
   private advance(): Token { return this.tokens[this.pos++]; }
   private expect(type: TokenType): Token {
@@ -267,7 +248,6 @@ export class Parser {
     if (this.peek().type === type) return this.advance();
     return null;
   }
-
   parse(): ASTNode[] {
     const stmts: ASTNode[] = [];
     while (!this.match("EOF")) {
@@ -276,7 +256,6 @@ export class Parser {
     }
     return stmts;
   }
-
   private parseTopLevel(): ASTNode | null {
     const t = this.peek();
     if (t.type === "COMMENT" || t.type === "LINE_COMMENT") {
@@ -288,7 +267,6 @@ export class Parser {
     }
     return this.parseStatement();
   }
-
   private parseVarBlock(): VarBlockNode {
     const t = this.advance();
     const decls: VarDeclNode[] = [];
@@ -301,11 +279,9 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "var_block", scope: t.value.toUpperCase(), decls, line: t.line };
   }
-
   private parseVarDecl(): VarDeclNode | null {
     if (!this.match("IDENT")) return null;
     const name = this.advance();
-
     // Optional IEC 61131-3 direct-address clause:  IDENT AT %IX0.0 : ...
     // Mitsubishi GX Works2 uses bare device names without the % prefix:
     // IDENT AT M1000 : ...   IDENT AT D5000 : ...
@@ -321,7 +297,6 @@ export class Parser {
       }
       directAddress = addrParts.join("");
     }
-
     this.expect("COLON");
     // Type can be complex: ARRAY[0..10] OF DINT, STRING[80], etc.
     // The tokenizer ate whitespace, so re-insert a space before any token
@@ -345,7 +320,6 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "var_decl", name: name.value, type: typeName.trim(), initial, line: name.line };
   }
-
   private parseStatement(): ASTNode | null {
     const t = this.peek();
     if (t.type === "COMMENT" || t.type === "LINE_COMMENT") {
@@ -360,7 +334,6 @@ export class Parser {
     if (t.type === "REPEAT") return this.parseRepeat();
     if (t.type === "EXIT") { this.advance(); this.consume("SEMI"); return { kind: "exit", line: t.line }; }
     if (t.type === "RETURN") { this.advance(); this.consume("SEMI"); return { kind: "return", line: t.line }; }
-
     // Assignment or call
     const expr = this.parseExpression();
     if (this.consume("ASSIGN")) {
@@ -376,7 +349,6 @@ export class Parser {
     }
     return expr;
   }
-
   private parseIf(): IfNode {
     const line = this.expect("IF").line;
     const condition = this.parseExpression();
@@ -397,7 +369,6 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "if", condition, thenBlock, elsifBranches, elseBlock, line };
   }
-
   private parseCase(): CaseNode {
     const line = this.expect("CASE").line;
     const selector = this.parseExpression();
@@ -417,7 +388,6 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "case", selector, branches, elseBlock, line };
   }
-
   private parseFor(): ForNode {
     const line = this.expect("FOR").line;
     const variable = this.expect("IDENT").value;
@@ -433,7 +403,6 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "for", variable, start, end, step, body, line };
   }
-
   private parseWhile(): WhileNode {
     const line = this.expect("WHILE").line;
     const condition = this.parseExpression();
@@ -443,7 +412,6 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "while", condition, body, line };
   }
-
   private parseRepeat(): RepeatNode {
     const line = this.expect("REPEAT").line;
     const body = this.parseStatementList("UNTIL");
@@ -453,7 +421,6 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "repeat", body, until, line };
   }
-
   private parseStatementList(...terminators: TokenType[]): ASTNode[] {
     const stmts: ASTNode[] = [];
     while (!terminators.includes(this.peek().type) && !this.match("EOF")) {
@@ -462,10 +429,8 @@ export class Parser {
     }
     return stmts;
   }
-
   // === Expression parsing (precedence climbing) ===
   private parseExpression(): ASTNode { return this.parseOr(); }
-
   private parseOr(): ASTNode {
     let left = this.parseXor();
     while (this.match("OR")) { const t = this.advance(); left = { kind: "logical", op: "OR", left, right: this.parseXor(), line: t.line }; }
@@ -577,7 +542,6 @@ export class Parser {
     }
     return node;
   }
-
   private parseAtom(): ASTNode {
     const t = this.peek();
     if (t.type === "NUMBER") { this.advance(); return { kind: "literal", value: t.value, litType: "int", line: t.line }; }
@@ -599,7 +563,6 @@ export class Parser {
     return { kind: "literal", value: t.value, litType: "int", line: t.line };
   }
 }
-
 export function parseSTSource(source: string): ASTNode[] {
   const tokens = tokenize(source);
   const parser = new Parser(tokens);
