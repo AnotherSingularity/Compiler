@@ -9,4 +9,8 @@ export * from "./source";
 export * from "./diagnostics";
 export * from "./compile";
 export * from "./hash";
+export * from "./operations";
+export * from "./capability";
+export * from "./ir";
+export * from "./plugin";
 export { COMPILER_VERSION, IR_SCHEMA_VERSION } from "../version";

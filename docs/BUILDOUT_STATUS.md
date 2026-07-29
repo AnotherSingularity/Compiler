@@ -94,7 +94,7 @@ modules are acyclic with their targets so the change is behavior-preserving.
 
 ## Phase 1 — Public Compiler Contracts
 
-**Status:** COMPLETE · **Commit:** `<phase1>` (this commit)
+**Status:** COMPLETE · **Commit:** `6ab0c72` · **CI:** run 30470630294 = success
 
 **Files (new):** `server/compiler/version.ts`, `server/compiler/contracts/{ids,source,
 diagnostics,compile,hash,index}.ts`, `server/compiler/compat/legacy-adapter.ts`,
@@ -138,3 +138,65 @@ validation, unknown-language rejection, unsupported-combination fail-closed, det
 `LanguageBackend`, deterministic registry, detection with confidence/evidence, register
 Rockwell Logix ST / Rockwell L5K / Mitsubishi GX ST; move the orchestrator off the direct
 `ab2mel`/`mel2ab` if/else so legacy directions live only in the adapter).
+
+---
+
+## Phase 2 — Language Registry and Plugin Interfaces
+
+**Status:** COMPLETE · **Commit:** `<phase2>` (this commit)
+
+**Files (new):** `server/compiler/contracts/{operations,capability,ir,plugin}.ts`,
+`server/compiler/registry/{registry,orchestrator,default-registry,index}.ts`,
+`server/compiler/languages/{rockwell,mitsubishi}.ts`,
+`server/compiler/compat/legacy-bridge.ts`, `tests/compiler/registry.test.ts`.
+**Files (changed):** `server/compiler/contracts/index.ts` (re-exports),
+`server/compiler/compat/legacy-adapter.ts` (now routes through the registry), ledger.
+
+**Architectural result:**
+- Canonical semantic vocabulary (invariant C): `SemanticOperationKind` (28, incl.
+  TimerOnDelay/TimerRetentive/CounterUp/BlockCopy/MaskedMove/PIDControl/MotionCommand/
+  VendorExtension/UnsupportedOperation), `CanonicalTypeKind` (14), `ProjectFeatureKind` (8).
+  Vendor mnemonics never appear as canonical identities.
+- Plugin contracts: `LanguageFrontend` (detect→confidence+evidence, parse→ParseResult),
+  `LanguageBackend` (capabilities/lower/emit), `CapabilityManifest`/`CapabilityRule`,
+  `DetectionResult`, and a transitional `SourceEmitCapable` used during the IR migration.
+- `LanguageRegistry`: explicit registration (no hidden global side effects), deterministic
+  id-sorted listing/inventory, **duplicate registration fails deterministically**
+  (`RegistryError`), detection aggregates candidates and **fails closed on ambiguity**
+  (margin 0.15) and on no-match.
+- Built-in plugins registered: Rockwell Logix ST (frontend+backend), Rockwell L5K
+  (frontend; project bodies delegate to Logix ST — invariant A), Mitsubishi GX ST
+  (frontend+backend). Backends expose machine-readable capability manifests (PID→manual_port,
+  Motion→unsupported, TimerOnDelay→lossy, etc.).
+- **Central orchestrator (`compileWithRegistry`) has no `ab2mel`/`mel2ab`** — it detects/
+  resolves the source, looks up the target backend, checks the emit surface, and fails
+  closed otherwise. Legacy direction strings now live ONLY in `compat/legacy-bridge.ts`
+  and the `directionToLanguages` map in the adapter (compat layer).
+- `legacy-adapter.compile()` rewired to build an explicit request and delegate to the
+  orchestrator → still byte-equivalent to `translate()` for the two PoC routes.
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test` **71 passed, 1 skipped** (18 new Phase-2
+tests) · `pnpm test:corpus` 7/7 · `pnpm test:roundtrip` 6/6 · `pnpm build` OK. Phase-2 tests
+cover: registry ordering/duplicate-failure/inventory determinism; detection confidence+
+evidence, ambiguity fail-closed, no-match; orchestrator routing + legacy equivalence +
+fail-closed on ambiguous/no-backend; capability manifest inspection; frontend parse.
+
+**Known limitations:**
+- Emission still flows through the legacy bridge (`translate()`), not canonical IR. The
+  backends' `lower()`/`emit()` return `LOWERING_/EMIT_IR_PATH_PENDING` info diagnostics
+  until Phase 5 wires the IR path. `CanonicalProgram`/`LoweredProgram` are Phase-2 stubs
+  (Phase 3 fleshes them out); frontend `parse()` carries the legacy AST in `program.raw`.
+- Detection between dialect-neutral Rockwell vs Mitsubishi ST is intentionally ambiguous
+  (correct fail-closed); the legacy adapter still resolves it via the L5K signature +
+  direction pairing (legacy-mirroring), not the registry detector.
+- `semanticLosses` still `[]` (Phase 6). `CompileResult.ok` not yet tightened (Phase 6).
+
+**Phase 2 gate:** MET — orchestrator no longer contains an `ab2mel`/`mel2ab` if/else;
+legacy directions live only in the compat bridge/adapter.
+
+**Next phase:** Phase 3 — Canonical PLC IR v1 (`server/compiler/ir/`): real node model
+(program structure, types, expressions, statements) separate from the syntax AST,
+deterministic JSON (de)serialization + schema validation, stable hashes, source-span
+preservation, `irSchemaVersion` 1.0.0. First files: `server/compiler/ir/nodes.ts`,
+`server/compiler/ir/serialize.ts`, `server/compiler/ir/validate.ts`, and
+`tests/compiler/ir.test.ts`.
