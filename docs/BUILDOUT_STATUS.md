@@ -200,3 +200,75 @@ deterministic JSON (de)serialization + schema validation, stable hashes, source-
 preservation, `irSchemaVersion` 1.0.0. First files: `server/compiler/ir/nodes.ts`,
 `server/compiler/ir/serialize.ts`, `server/compiler/ir/validate.ts`, and
 `tests/compiler/ir.test.ts`.
+
+---
+
+## Stage 0 (continuation) — Reverify handoff
+
+**Status:** COMPLETE. Branch `claude/happy-johnson-dy7zxl`, local==remote==`fd129af`, clean,
+no in-progress git op. Phase 2 CI run `30471375064` (head `c22680b`) = **success**. Baseline
+gate reverified green at `fd129af`: `pnpm install --frozen-lockfile` (lockfile unchanged),
+`pnpm check` 0, `pnpm test` 71 passed/1 skipped, `pnpm test:corpus` 7/7, `pnpm test:roundtrip`
+6/6, `pnpm build` OK.
+
+---
+
+## Stage 1 — Canonical PLC IR v1
+
+**Status:** COMPLETE · **Commit:** `<stage1>` (this commit)
+
+**Files (new):** `server/compiler/ir/{version,nodes,types,expressions,operations,statements,
+declarations,project,hash,serialize,validate,upgrade,guards,normalize,index}.ts`;
+`tests/compiler/ir/{ir,corpus-normalization}.test.ts`. **Changed:** `package.json`
+(`test:ir` script), this ledger.
+
+**Architectural result:**
+- Real canonical semantic program model **separate from the syntax AST** (the parser AST is
+  NOT renamed). Nodes: program/resource/task/io_point; routine/function/function_block;
+  var_decl/type_decl; 15 expression kinds; 15 statement kinds; `semantic_operation` with a
+  canonical `SemanticOperationKind` (snake_case, 25 kinds) — vendor mnemonics (TON/RTO/CTU/
+  COP/CPS/BMOV/MVM/RES/LIM…) live only in provenance/`vendorAnnotations`.
+- 14 canonical types (bool/int{signed,bits}/real{bits}/string{capacity}/time/date/datetime/
+  array{explicit bounds,inferred flag}/structure/enumeration/alias/fb_instance/hardware_ref/
+  opaque_vendor/unresolved).
+- **Deterministic structural node ids** (`nodeIdFromPath` = sha256 of a source-structural
+  path → `ir_<12hex>`): stable across recompiles, insertion-order changes, and hash seed;
+  no random UUIDs.
+- Provenance on every node: `SourceOrigin` (sourceId/language/artifactKind/span/nodeKind/
+  mnemonic) or `SyntheticOrigin` (generatedBy/derivedFrom/reason) — synthetic nodes never
+  get a fake source span.
+- **Deterministic serialization** (`canonicalJson` key-sorted) + envelope
+  (`schema:"plc-canonical-ir"`, `schemaVersion` 1.0.0, compilerVersion, program, hashes);
+  `assertPlainData` rejects functions/class-instances/cycles; two hashes — `serialized`
+  (incl. provenance) and `semantic` (provenance-stripped).
+- **Validation** → `IR_*` diagnostics: unknown node kind, duplicate id, broken reference
+  (synthetic derivedFrom), invalid span, missing origin, missing expression type, invalid
+  array bounds, vendor-mnemonic-as-identity, unknown operation, schema tag/version.
+- **Upgrade registry**: passes v1 through; rejects future/unknown versions and missing
+  upgrade paths (never silently reinterprets).
+- **Normalizer** `normalizeStProgram/normalizeStRoutineAst`: maps the parser AST subset →
+  IR with structural ids + real spans; unresolved types stay `unresolved` (no fabricated
+  types — Stage 2 resolves them).
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test:ir` **45 passed** (2 files) · `pnpm test`
+**116 passed, 1 skipped** · `pnpm test:corpus` 7/7 · `pnpm test:roundtrip` 6/6 · `pnpm build`
+OK. IR tests cover schema/envelope round-trip, serialization determinism + byte-stability,
+plain-data rejection, stable node ids, validation (all IR_* codes above), upgrade
+accept/reject, provenance, and **corpus normalization** of all 7 ST fixtures (validate-clean,
+deterministic hash/ids, envelope round-trip, no vendor mnemonic as identity).
+
+**Known limitations / honesty:**
+- The IR is **not yet the production path** — production still routes through the registry →
+  legacy bridge → `translate()` (Stage 3 wires the IR through lowering + emission). The
+  normalizer covers the ST expression/statement subset; declarations map primitives only
+  (arrays/UDT type-string parsing is Stage 2), and semantic operations (timers/counters/
+  copy) are NOT yet produced by the normalizer — that is Stage 2 operation-normalization.
+- No symbol/type resolution yet (all non-literal expression types are `unresolved`) — Stage 2.
+
+**Stage 1 gate:** MET — canonical IR is real, serializable, validated, hashed, and exercised
+by corpus-derived tests.
+
+**Next:** Stage 2 — semantic-analysis pipeline (`server/compiler/semantic/`): scopes, symbols,
+type resolution, conversion classification, **parser recovery correction** (remove the
+literal-fabrication fallback), and operation normalization (TON→timer_on_delay, COP→block_copy,
+etc.) feeding the IR. Then Stage 3 migrates Rockwell/Mitsubishi production through the IR.
