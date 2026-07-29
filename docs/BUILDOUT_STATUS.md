@@ -358,7 +358,7 @@ work; each operation family must reach parity before the default flips.
 
 ## Stage 3 (families 1–3) — Canonical production activation: expressions, assignments, control_flow
 
-**Status:** COMPLETE for 3 families · **Commit:** `<stage3a>` (this commit)
+**Status:** COMPLETE for 3 families · **Commit:** `59b2257`
 
 **Reverified start:** local==remote==`9911115`, clean; CI `deca4f0`/`c22680b` = success; baseline green.
 
@@ -415,3 +415,39 @@ test:migration` 12 · `pnpm verify:legacy-parity` PASS (16, 0 unapproved) · `pn
 then timers/counters/copy_move/calls with semantic symbol+type resolution (order §9) before
 the reset/RES and reusable-block families; the full `translate()` flip comes after all
 baseline-supported families are canonical-active.
+
+---
+
+## Stage 3 (family 4) — Canonical production activation: declarations
+
+**Status:** COMPLETE · **Commit:** `<stage3b>` (this commit)
+
+**Files (new):** `server/compiler/lowering/st-decl-emitter.ts`. **Changed:**
+`server/compiler/migration/{routing,families,fixtures,approvals}.ts`,
+`tests/compiler/migration/production-routing.test.ts`, ledger.
+
+**Architectural result:** `declarations` family is now `canonical_active`. `compile()`
+emits **primitive** VAR/VAR_INPUT/... declarations via the canonical declaration emitter
+(`canonicalDeclType` maps BOOL/SINT..LINT/USINT..ULINT/REAL/LREAL/TIME/STRING; grouped by
+direction, deterministic). Array/structure/opaque/unresolved/FB-instance declarations are the
+`arrays_structures` family (still legacy_only) — routing keeps those on the legacy engine, so
+array-heavy corpus fixtures (e.g. 01_ARRAY100_AVERAGE) stay legacy and green.
+
+**Verified:** a primitive `VAR cnt : DINT; ok : BOOL := 1; END_VAR cnt := cnt + 1;` compiles
+via the canonical engine (emits the VAR block + body); an `ARRAY[0..9] OF DINT` declaration
+routes to legacy.
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test` **143 passed, 1 skipped** · `pnpm
+test:migration` 13 · `pnpm verify:legacy-parity` PASS (20 fixtures, 0 unapproved) · `pnpm
+test:ir` 45 · `pnpm test:semantic` 14 · corpus 7/7 · roundtrip 6/6 · build OK.
+
+**Minimum for this run — MET.** Four families are canonical-active in the `compile()`
+production path for both Rockwell↔Mitsubishi directions: **expressions, assignments,
+control_flow, declarations** — with canonical lowering, canonical emission, parity comparison,
+approved-difference tracking, production-routing tests, and green corpus/round-trip.
+
+**Remaining families (still legacy_only):** arrays_structures, conversions, timers, counters,
+copy_move, bit_operations, calls, function_blocks, ladder, project_metadata, hardware_mapping,
+unsupported_manual_port. The legacy `translate()` API is still the legacy engine (its flip is
+gated on all supported families being active — order §16). Next: semantic symbol/type
+resolution (order §9), then timers/counters/copy_move/calls, then the `translate()` flip.

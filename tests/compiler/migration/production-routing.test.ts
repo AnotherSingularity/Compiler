@@ -7,14 +7,23 @@ import { tryCanonicalCompile } from "../../../server/compiler/migration/routing"
 import { defaultRegistry } from "../../../server/compiler/migration/families";
 
 describe("Stage 3 — production routing (expressions/assignments/control_flow are canonical-active)", () => {
-  it("registry marks expressions/assignments/control_flow canonical_active, others legacy", () => {
+  it("registry marks expressions/assignments/control_flow/declarations canonical_active, others legacy", () => {
     const reg = defaultRegistry();
     expect(reg.isActive("expressions")).toBe(true);
     expect(reg.isActive("assignments")).toBe(true);
     expect(reg.isActive("control_flow")).toBe(true);
+    expect(reg.isActive("declarations")).toBe(true);
     expect(reg.isActive("timers")).toBe(false);
     expect(reg.isActive("calls")).toBe(false);
-    expect(reg.isActive("declarations")).toBe(false);
+    expect(reg.isActive("arrays_structures")).toBe(false);
+  });
+
+  it("primitive VAR declarations compile via the CANONICAL engine; array declarations fall back to LEGACY", () => {
+    const prim = compileLegacy("VAR\n  cnt : DINT;\n  ok : BOOL := 1;\nEND_VAR\ncnt := cnt + 1;", "ab2mel");
+    expect(prim.migration?.engine).toBe("canonical");
+    expect(prim.artifacts.find((a) => a.name === "output.st")?.content).toContain("cnt : DINT;");
+    const arr = compileLegacy("VAR\n  buf : ARRAY[0..9] OF DINT;\nEND_VAR\nbuf[0] := 1;", "ab2mel");
+    expect(arr.migration?.engine).toBe("legacy");
   });
 
   it("a pure expression/assignment program compiles via the CANONICAL engine", () => {

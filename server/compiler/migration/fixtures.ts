@@ -16,6 +16,8 @@ const SNIPPETS: Array<{ id: string; family: string; source: string }> = [
   { id: "cf_case", family: "control_flow", source: "CASE sel OF\n  1:\n    a := 1;\nELSE\n  a := 0;\nEND_CASE;" },
   { id: "cf_for", family: "control_flow", source: "FOR i := 0 TO 10 DO\n  sum := sum + i;\nEND_FOR;" },
   { id: "cf_while", family: "control_flow", source: "WHILE go DO\n  n := n - 1;\nEND_WHILE;" },
+  { id: "decl_prim", family: "declarations", source: "VAR\n  cnt : DINT;\n  ok : BOOL := 1;\nEND_VAR\ncnt := cnt + 1;" },
+  { id: "decl_real", family: "declarations", source: "VAR\n  rate : REAL := 1.5;\nEND_VAR\nrate := rate * 2.0;" },
 ];
 
 export const PARITY_FIXTURES: ParityFixture[] = SNIPPETS.flatMap((s) => [

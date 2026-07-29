@@ -18,6 +18,7 @@ import { parseSTSourceWithDiagnostics } from "../parser";
 import { normalizeStProgram } from "../ir/normalize";
 import { normalizeProgramOperations } from "../semantic/operation-normalization";
 import { emitRoutineBody, type StEmitTarget } from "../lowering/st-emitter";
+import { emitDeclarations, declsAreCanonical } from "../lowering/st-decl-emitter";
 import {
   MigrationRegistry,
   defaultRegistry,
@@ -64,11 +65,19 @@ function analyze(program: CanonicalProgram, reg: MigrationRegistry): Coverage {
   let legacyNodeCount = 0;
   let covered = true;
 
-  // Declarations family gates any locals/globals.
-  const hasDecls = program.globals.length > 0 || program.routines.some((r) => r.locals.length > 0);
-  if (hasDecls) {
-    families.add("declarations");
-    if (!reg.isActive("declarations")) { covered = false; reasons.push("declarations not canonical_active"); }
+  // Declarations gate: primitive declarations are the `declarations` family;
+  // arrays/structures/opaque/unresolved declarations belong to
+  // `arrays_structures` (still legacy) — keep those on the legacy engine.
+  const allDecls = [...program.globals, ...program.routines.flatMap((r) => r.locals)];
+  if (allDecls.length > 0) {
+    if (!declsAreCanonical(allDecls)) {
+      families.add("arrays_structures");
+      covered = false;
+      reasons.push("non-primitive declaration (arrays_structures) not canonical_active");
+    } else {
+      families.add("declarations");
+      if (!reg.isActive("declarations")) { covered = false; reasons.push("declarations not canonical_active"); }
+    }
   }
 
   const walk = (stmt: Statement): void => {
@@ -121,7 +130,14 @@ export function tryCanonicalCompile(
   if (!cov.covered) return null;
 
   const target: StEmitTarget = { language: targetLanguage };
-  const body = program.routines.map((r) => emitRoutineBody(r, target)).join("\n");
+  const lines: string[] = [];
+  lines.push(...emitDeclarations(program.globals, target));
+  for (const r of program.routines) {
+    lines.push(...emitDeclarations(r.locals, target));
+    const rb = emitRoutineBody(r, target);
+    if (rb !== "") lines.push(rb);
+  }
+  const body = lines.join("\n");
   const outputLines = body === "" ? 0 : body.split("\n").length;
   const familyStatuses: Record<string, string> = {};
   for (const f of cov.families) familyStatuses[f] = reg.get(f);
