@@ -31,6 +31,7 @@ import {
   BranchNode,
   SeriesNode,
   instructionRole,
+  parseRung,
 } from "./ladder_parser";
 export interface EmitOptions {
   /** Prepend a comment with the original rung source. Default true. */
@@ -501,9 +502,8 @@ export interface EmitRoutineResult {
  * concatenates the output, with comments preserving original structure.
  */
 export function emitLadderRoutine(rungs: RungInput[], indent = ""): EmitRoutineResult {
-  // Lazy-import parseRung to avoid circular issues
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { parseRung } = require("./ladder_parser");
+  // parseRung is imported statically (see top of file). A lazy require() here
+  // breaks under ESM (the production bundle is `--format=esm`) and under vitest.
   const lines: string[] = [];
   const manualPortSet = new Set<string>();
   const warnings: string[] = [];

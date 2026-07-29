@@ -9,6 +9,7 @@ import { parseSTSource } from "./compiler/parser";
 import { emitMEL } from "./compiler/emitter";
 import { emitAB } from "./compiler/emitter-ab";
 import { looksLikeL5K, extractL5K, joinExtractedRoutines } from "./compiler/l5k_extract";
+import { emitLadderRoutine } from "./compiler/ladder_emitter";
 import { emitLabelsCsv, emitUdtSummary } from "./compiler/labels_emitter";
 import { emitIoMapYaml } from "./compiler/module_emitter";
 import { emitAoiAsFb, groupRoutinesByAoi } from "./compiler/aoi_emitter";
@@ -323,9 +324,8 @@ function translateL5K(
       stats: { inputLines, outputLines: 0, warningCount: 0, manualPortCount: 0, translatedNodes: 0 },
     };
   }
-  // Lazy-import to avoid pulling ladder_emitter unless we need it
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { emitLadderRoutine } = require("./compiler/ladder_emitter");
+  // emitLadderRoutine is imported statically (see top of file). A lazy
+  // require() here breaks under ESM (the production bundle is `--format=esm`).
   const outChunks: string[] = [];
   outChunks.push(
     `(* L5K extraction from controller "${extracted.controllerName ?? "<unknown>"}" (IE_VER ${extracted.ieVer ?? "?"}) *)`,
