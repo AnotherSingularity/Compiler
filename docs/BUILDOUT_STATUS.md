@@ -277,7 +277,7 @@ etc.) feeding the IR. Then Stage 3 migrates Rockwell/Mitsubishi production throu
 
 ## Stage 2 (part A) — Operation normalization
 
-**Status:** COMPLETE (partial stage) · **Commit:** `<stage2a>` (this commit)
+**Status:** COMPLETE (partial stage) · **Commit:** `c896c84`
 
 **Files (new):** `server/compiler/semantic/{operation-normalization,index}.ts`,
 `tests/compiler/semantic/operations.test.ts`. **Changed:** `package.json` (`test:semantic`),
@@ -308,3 +308,48 @@ production compile path (Stage 3). Production emission still routes registry →
 
 **Next:** Stage 2 (part B) — scope/symbol/type resolution + conversion classification +
 parser-recovery correction; then Stage 3 production migration through the IR.
+
+---
+
+## Stage 2 (part B, subset) — Parser recovery correction
+
+**Status:** COMPLETE (partial stage) · **Commit:** `<stage2b>` (this commit)
+
+**Reverified start:** local==remote==`c896c84`, clean. Prior CI: Stage 1 `deca4f0` run
+30472975634 = success; Phase 2 `c22680b` run 30471375064 = success. Baseline gate green.
+
+**Files (changed):** `server/compiler/parser.ts` (production parser). **New:**
+`tests/compiler/semantic/parser-recovery.test.ts`.
+
+**Architectural result (real production change):** The parser's `parseAtom` fallback no
+longer fabricates an integer literal for unexpected tokens. It now records a structured
+`PARSE_UNEXPECTED_TOKEN` diagnostic, consumes the token (guaranteed forward progress), and
+returns an explicit `ErrorNode` carrying the offending text + source position. Added:
+`ErrorNode`/`ParseDiagnostic` types, a `diagnostics` collection + `maxErrors` (500) recovery
+cap on the `Parser`, and a new `parseSTSourceWithDiagnostics(source) → {ast, diagnostics,
+partial}` entry point. `parseSTSource(source): ASTNode[]` is unchanged, so all existing
+callers (translate/emit/normalize) are unaffected. This is in the **production parse path**
+used by `translate()` — malformed input can no longer manufacture an executable value.
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test:semantic` **14 passed** (8 ops + 6 recovery)
+· `pnpm test` **130 passed, 1 skipped** · corpus 7/7 · roundtrip 6/6 · build OK. Recovery
+tests: no fabricated literal, error node + PARSE_ diagnostic emitted, span preserved, clean
+source → 0 diagnostics/not partial, termination on repeated garbage (cap respected),
+deterministic diagnostic ordering, AST-only entry point still clean.
+
+**HONEST STATUS OF THE PRODUCTION-PATH FLIP (the primary ask of this order):**
+- **NOT DONE.** Actual translation output is **still produced by the legacy engine**
+  (`translate()` → `emitMEL`/`emitAB`) via the registry → bridge. The canonical
+  IR + operation normalization + parser recovery are real and tested, but the
+  canonical **lowering + emission** layer that would let the canonical path reproduce the
+  legacy corpus output at parity does NOT exist yet, so the default path was not flipped.
+- Flipping the default before a parity-capable canonical ST emitter exists would make
+  corpus/round-trip/CI red (forbidden) or require rewriting corpus assertions to match new
+  output (snapshot-gaming, forbidden). Neither was done. The legacy engine remains the
+  production default, honestly.
+
+**Next (load-bearing, remaining):** build `server/compiler/lowering/{rockwell,mitsubishi}`
+consuming canonical IR and a canonical ST emitter that reaches corpus parity, add
+`verify:legacy-parity` + `tests/compiler/migration/*`, THEN flip `compile()`/`translate()` to
+the canonical path with legacy demoted to `translateLegacyForParity`. This is multi-commit
+work; each operation family must reach parity before the default flips.

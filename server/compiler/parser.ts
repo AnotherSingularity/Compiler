@@ -202,7 +202,7 @@ export type ASTNode =
   | BinaryOpNode | UnaryOpNode | CompareNode | LogicalNode
   | IdentNode | LiteralNode | MemberAccessNode | BitAccessNode
   | IndexNode | FunctionCallNode | TypeCastNode
-  | CommentNode | BlockNode;
+  | CommentNode | BlockNode | ErrorNode;
 export interface ProgramNode { kind: "program"; name: string; varBlocks: VarBlockNode[]; body: ASTNode[]; line: number; }
 export interface VarBlockNode { kind: "var_block"; scope: string; decls: VarDeclNode[]; line: number; }
 export interface VarDeclNode { kind: "var_decl"; name: string; type: string; initial: ASTNode | null; line: number; }
@@ -229,12 +229,29 @@ export interface FunctionCallNode { kind: "function_call"; name: string; args: A
 export interface TypeCastNode { kind: "type_cast"; targetType: string; expr: ASTNode; line: number; }
 export interface CommentNode { kind: "comment"; text: string; isBlock: boolean; line: number; }
 export interface BlockNode { kind: "block"; statements: ASTNode[]; line: number; }
+/**
+ * Explicit parse-error node. Produced instead of fabricating a literal for an
+ * unexpected token, so downstream passes see a real error rather than a fake
+ * value. Carries the offending text and source position for diagnostics.
+ */
+export interface ErrorNode { kind: "error"; text: string; reason: string; line: number; col: number; }
+/** Structured parser diagnostic (PARSE_*). */
+export interface ParseDiagnostic { code: string; message: string; line: number; col: number; }
 // === Parser ===
 export class Parser {
   private tokens: Token[];
   private pos = 0;
+  /** Structured parse diagnostics collected during recovery (PARSE_*). */
+  readonly diagnostics: ParseDiagnostic[] = [];
+  /** Cap on recovered errors to guarantee termination on pathological input. */
+  private readonly maxErrors = 500;
   constructor(tokens: Token[]) {
     this.tokens = tokens;
+  }
+  private recordError(code: string, message: string, tok: Token): void {
+    if (this.diagnostics.length < this.maxErrors) {
+      this.diagnostics.push({ code, message, line: tok.line, col: tok.col });
+    }
   }
   private peek(): Token { return this.tokens[this.pos] || { type: "EOF", value: "", line: 0, col: 0 }; }
   private advance(): Token { return this.tokens[this.pos++]; }
@@ -556,15 +573,27 @@ export class Parser {
       this.expect("RPAREN");
       return expr;
     }
-    // Fallback: skip unknown tokens
-    // Type conversions (DINT_TO_REAL etc.) are handled as function calls via IDENT path
-    // Skip unknown tokens
-    this.advance();
-    return { kind: "literal", value: t.value, litType: "int", line: t.line };
+    // Recovery: an unexpected token is a real parse error, NOT a value.
+    // Record a structured diagnostic, consume the token to guarantee forward
+    // progress, and return an explicit error node. Never fabricate a literal.
+    const tok = this.advance();
+    this.recordError("PARSE_UNEXPECTED_TOKEN", `Unexpected token '${tok.value || tok.type}' in expression`, tok);
+    return { kind: "error", text: tok.value, reason: "unexpected token in expression", line: tok.line, col: tok.col };
   }
 }
 export function parseSTSource(source: string): ASTNode[] {
   const tokens = tokenize(source);
   const parser = new Parser(tokens);
   return parser.parse();
+}
+/**
+ * Parse and also return structured recovery diagnostics + partial status.
+ * Used by the semantic pipeline; `parseSTSource` remains the AST-only entry
+ * point for existing callers.
+ */
+export function parseSTSourceWithDiagnostics(source: string): { ast: ASTNode[]; diagnostics: ParseDiagnostic[]; partial: boolean } {
+  const tokens = tokenize(source);
+  const parser = new Parser(tokens);
+  const ast = parser.parse();
+  return { ast, diagnostics: parser.diagnostics, partial: parser.diagnostics.length > 0 };
 }
