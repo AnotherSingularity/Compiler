@@ -16,6 +16,7 @@
     "test:corpus": "tsx tests/corpus/run.ts",
     "test:roundtrip": "tsx tests/corpus/roundtrip.ts",
     "test:ir": "vitest run tests/compiler/ir",
+    "test:semantic": "vitest run tests/compiler/semantic",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "android": "expo start --android",
     "ios": "expo start --ios",

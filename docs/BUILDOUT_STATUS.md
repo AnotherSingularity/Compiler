@@ -215,7 +215,7 @@ gate reverified green at `fd129af`: `pnpm install --frozen-lockfile` (lockfile u
 
 ## Stage 1 — Canonical PLC IR v1
 
-**Status:** COMPLETE · **Commit:** `<stage1>` (this commit)
+**Status:** COMPLETE · **Commit:** `deca4f0`
 
 **Files (new):** `server/compiler/ir/{version,nodes,types,expressions,operations,statements,
 declarations,project,hash,serialize,validate,upgrade,guards,normalize,index}.ts`;
@@ -272,3 +272,39 @@ by corpus-derived tests.
 type resolution, conversion classification, **parser recovery correction** (remove the
 literal-fabrication fallback), and operation normalization (TON→timer_on_delay, COP→block_copy,
 etc.) feeding the IR. Then Stage 3 migrates Rockwell/Mitsubishi production through the IR.
+
+---
+
+## Stage 2 (part A) — Operation normalization
+
+**Status:** COMPLETE (partial stage) · **Commit:** `<stage2a>` (this commit)
+
+**Files (new):** `server/compiler/semantic/{operation-normalization,index}.ts`,
+`tests/compiler/semantic/operations.test.ts`. **Changed:** `package.json` (`test:semantic`),
+ledger.
+
+**Architectural result:** `normalizeProgramOperations(program)` — a pure, deterministic pass
+that rewrites canonical `call` nodes whose name is a known vendor mnemonic into canonical
+`semantic_operation` nodes (invariant C). Mapping: TON→timer_on_delay, TOF→timer_off_delay,
+RTO/TONR→timer_retentive, CTU→counter_up, CTD→counter_down, COP/BMOV→block_copy,
+CPS→synchronous_block_copy, MVM→masked_move, LIM/LIMIT→limit_test, MSG→message_transfer,
+PID/PIDE→pid_control, JSR→routine_call. The mnemonic is preserved in `origin.sourceMnemonic`
++ `vendorAnnotations.mnemonic`; node ids and statement order are preserved (stable hashes for
+unaffected structure); the input is not mutated. Recurses through nested control flow. A
+default disposition hint is attached (Stage 4 capability enforcement is authoritative).
+Conservative: RES is intentionally NOT mapped (its canonical identity — timer_reset vs
+counter_reset — needs operand type resolution, which is later Stage 2 work; mapping it now
+would be a guess).
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test:semantic` **8 passed** · `pnpm test` **124
+passed, 1 skipped** · `pnpm test:ir` 45 · corpus 7/7 · roundtrip 6/6 · build OK.
+
+**Known limitations / honesty:** This is one Stage-2 pass. The remaining Stage-2 work —
+scopes/symbols, type resolution, conversion classification, control-flow checks, the full
+`pipeline.ts`, and the **parser-recovery correction** (removing the literal-fabrication
+fallback) — is NOT yet done. The operation-normalization pass is not yet wired into a
+production compile path (Stage 3). Production emission still routes registry → legacy bridge
+→ `translate()`.
+
+**Next:** Stage 2 (part B) — scope/symbol/type resolution + conversion classification +
+parser-recovery correction; then Stage 3 production migration through the IR.
