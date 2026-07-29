@@ -143,7 +143,7 @@ Rockwell Logix ST / Rockwell L5K / Mitsubishi GX ST; move the orchestrator off t
 
 ## Phase 2 — Language Registry and Plugin Interfaces
 
-**Status:** COMPLETE · **Commit:** `<phase2>` (this commit)
+**Status:** COMPLETE · **Commit:** `c22680b` · **CI:** run 30471375064 (push, ci.yml)
 
 **Files (new):** `server/compiler/contracts/{operations,capability,ir,plugin}.ts`,
 `server/compiler/registry/{registry,orchestrator,default-registry,index}.ts`,
