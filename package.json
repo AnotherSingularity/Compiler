@@ -17,6 +17,8 @@
     "test:roundtrip": "tsx tests/corpus/roundtrip.ts",
     "test:ir": "vitest run tests/compiler/ir",
     "test:semantic": "vitest run tests/compiler/semantic",
+    "test:migration": "vitest run tests/compiler/migration",
+    "verify:legacy-parity": "tsx scripts/verify-legacy-parity.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "android": "expo start --android",
     "ios": "expo start --ios",

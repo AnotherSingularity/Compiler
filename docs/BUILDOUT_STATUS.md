@@ -313,7 +313,7 @@ parser-recovery correction; then Stage 3 production migration through the IR.
 
 ## Stage 2 (part B, subset) — Parser recovery correction
 
-**Status:** COMPLETE (partial stage) · **Commit:** `<stage2b>` (this commit)
+**Status:** COMPLETE (partial stage) · **Commit:** `9911115`
 
 **Reverified start:** local==remote==`c896c84`, clean. Prior CI: Stage 1 `deca4f0` run
 30472975634 = success; Phase 2 `c22680b` run 30471375064 = success. Baseline gate green.
@@ -353,3 +353,65 @@ consuming canonical IR and a canonical ST emitter that reaches corpus parity, ad
 `verify:legacy-parity` + `tests/compiler/migration/*`, THEN flip `compile()`/`translate()` to
 the canonical path with legacy demoted to `translateLegacyForParity`. This is multi-commit
 work; each operation family must reach parity before the default flips.
+
+---
+
+## Stage 3 (families 1–3) — Canonical production activation: expressions, assignments, control_flow
+
+**Status:** COMPLETE for 3 families · **Commit:** `<stage3a>` (this commit)
+
+**Reverified start:** local==remote==`9911115`, clean; CI `deca4f0`/`c22680b` = success; baseline green.
+
+**Files (new):** `server/compiler/migration/{families,routing,parity,fixtures,approvals,index}.ts`,
+`server/compiler/lowering/st-emitter.ts`, `scripts/verify-legacy-parity.ts`,
+`tests/compiler/migration/{production-routing,parity,no-legacy-import}.test.ts`.
+**Changed:** `server/compiler/registry/orchestrator.ts` (canonical routing before legacy),
+`server/compiler/contracts/compile.ts` (`migration` summary field), `package.json`
+(`test:migration`, `verify:legacy-parity`), ledger.
+
+**Architectural result — REAL production behavior change:**
+- Incremental migration model: `MigrationFamily` (16), `MigrationStatus`
+  (legacy_only/canonical_shadow/canonical_active/canonical_complete), version-controlled
+  `DEFAULT_FAMILY_STATUS` (**expressions/assignments/control_flow = canonical_active**, rest
+  legacy_only), inspectable `MigrationRegistry`.
+- Canonical ST lowering/emitter (`lowering/st-emitter.ts`) — precedence-correct,
+  minimally-parenthesized ST for expr/assign/control-flow; formats lowered IR nodes only;
+  isolated (a test fails if it imports the legacy translator/parser/emitters/bridge).
+- Orchestrator routing: `compile()` parses → normalizes to canonical IR → operation-
+  normalizes → checks family coverage; **if fully covered by active families it emits via the
+  canonical path** (`migration.engine === "canonical"`), else falls back to the legacy engine
+  (`engine === "legacy"`). Coverage requires every statement in an active family AND every
+  expression canonically emittable AND no unmigrated declarations. `CompileResult.migration`
+  exposes the routing.
+- Parity harness + `pnpm verify:legacy-parity`: compares canonical vs the legacy oracle for 16
+  fixtures (8 snippets × 2 directions); **0 unapproved differences**. All 16 differ from legacy
+  as `canonical_improvement` (legacy adds a `// [AB→MEL]` provenance comment + full
+  parenthesization; canonical is clean) — each pinned to both output hashes in
+  `approvals.ts`; the harness fails if a pinned hash drifts.
+
+**Verified production path (now):** `compile()` / `compileLegacy()` →
+`compileWithRegistry` → **canonical (expr/assign/control_flow) OR legacy (everything else)**.
+A pure `y := a + b * 2 - 1;` compiles to `y := a + b * 2 - 1;` via the canonical emitter; a
+program containing `TON(...)` routes to legacy and stays byte-identical.
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test` **142 passed, 1 skipped** · `pnpm
+test:migration` 12 · `pnpm verify:legacy-parity` PASS (16, 0 unapproved) · `pnpm test:ir` 45 ·
+`pnpm test:semantic` 14 · corpus 7/7 · roundtrip 6/6 · build OK.
+
+**HONEST scope boundary:**
+- Activated for the `compile()` registry path. The legacy `translate()` API still uses the
+  legacy engine directly (the full `translate()` flip is order §16, gated on ALL supported
+  families being canonical-active — not yet). So `translate()`-based corpus/round-trip are
+  unaffected and green.
+- Families still legacy_only: declarations, arrays_structures, conversions, timers, counters,
+  copy_move, bit_operations, calls, function_blocks, ladder, project_metadata,
+  hardware_mapping, unsupported_manual_port.
+- **Pre-existing parser limitation surfaced:** multi-branch `CASE` mis-parses (the branch
+  statement-list doesn't stop at the next label) — previously masked by the literal-fabrication
+  fallback, now an explicit `PARSE_UNEXPECTED_TOKEN`. Parity fixtures use single-branch CASE.
+  Fixing the CASE parser is deferred (protected-parser scope).
+
+**Next:** migrate `declarations` (canonical type emission + var declarations) as family 4,
+then timers/counters/copy_move/calls with semantic symbol+type resolution (order §9) before
+the reset/RES and reusable-block families; the full `translate()` flip comes after all
+baseline-supported families are canonical-active.

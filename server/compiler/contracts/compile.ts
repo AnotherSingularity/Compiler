@@ -75,6 +75,23 @@ export interface CompileStats {
   dispositions?: Partial<Record<TranslationDisposition, number>>;
 }
 
+/**
+ * Which engine produced the output and how the incremental migration routed the
+ * program, family by family. Present while the legacy engine and canonical
+ * pipeline coexist (transitional). `engine: "canonical"` means the output was
+ * produced by the canonical lowering/emission path, not the legacy translator.
+ */
+export interface MigrationExecutionSummary {
+  familyStatuses: Record<string, string>;
+  canonicalNodeCount: number;
+  legacyNodeCount: number;
+  fallbackCount: number;
+  shadowComparisonCount: number;
+  approvedDifferenceCount: number;
+  unapprovedDifferenceCount: number;
+  engine: "canonical" | "legacy";
+}
+
 export interface CompileHashes {
   /** sha256 over concatenated source artifact bytes. */
   source: string;
@@ -100,4 +117,6 @@ export interface CompileResult {
   semanticLosses: SemanticLossRecord[];
   stats: CompileStats;
   hashes: CompileHashes;
+  /** Transitional migration routing summary (canonical vs legacy). */
+  migration?: MigrationExecutionSummary;
 }

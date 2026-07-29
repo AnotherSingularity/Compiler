@@ -21,6 +21,7 @@ import {
   type GeneratedArtifact,
 } from "../contracts";
 import type { LanguageRegistry } from "./registry";
+import { tryCanonicalCompile } from "../migration/routing";
 
 function fail(
   request: CompileRequest,
@@ -105,7 +106,37 @@ export function compileWithRegistry(request: CompileRequest, registry: LanguageR
     ]);
   }
 
-  // ── Emit (transitional bridge) ──────────────────────────────────────────
+  // ── Canonical pipeline (active migration families) ──────────────────────
+  // If the whole program is covered by canonical-active families, emit via the
+  // canonical lowering/emission path. Otherwise fall through to the legacy
+  // engine (which still owns unmigrated families). This is the incremental
+  // production migration: canonical for what's activated, legacy for the rest.
+  const canonical = tryCanonicalCompile(source, resolvedSource, request.targetLanguage);
+  if (canonical) {
+    return {
+      ok: true,
+      completeness: "executable_complete",
+      compilerVersion: COMPILER_VERSION,
+      irSchemaVersion: IR_SCHEMA_VERSION,
+      sourceLanguage: resolvedSource,
+      targetLanguage: request.targetLanguage,
+      artifacts: canonical.artifacts,
+      diagnostics: canonical.diagnostics,
+      semanticLosses: [],
+      stats: {
+        inputLines: source.split("\n").length,
+        outputLines: canonical.outputLines,
+        warningCount: 0,
+        manualPortCount: 0,
+        errorCount: 0,
+        translatedNodes: canonical.translatedNodes,
+      },
+      hashes: { source: sha256Hex(source), artifacts: hashValue(canonical.artifacts), diagnostics: hashValue(canonical.diagnostics) },
+      migration: canonical.summary,
+    };
+  }
+
+  // ── Emit (transitional legacy bridge — unmigrated families) ─────────────
   const emit = backend.emitFromSource(resolvedSource, source, { options: request.options });
   const outputArtifact = emit.artifacts.find((a) => a.name === "output.st");
   const outputEmpty = !outputArtifact || outputArtifact.content.trim() === "";
@@ -129,5 +160,15 @@ export function compileWithRegistry(request: CompileRequest, registry: LanguageR
       translatedNodes: emit.stats.translatedNodes,
     },
     hashes: { source: sha256Hex(source), artifacts: hashValue(emit.artifacts), diagnostics: hashValue(emit.diagnostics) },
+    migration: {
+      familyStatuses: {},
+      canonicalNodeCount: 0,
+      legacyNodeCount: emit.stats.translatedNodes,
+      fallbackCount: 0,
+      shadowComparisonCount: 0,
+      approvedDifferenceCount: 0,
+      unapprovedDifferenceCount: 0,
+      engine: "legacy",
+    },
   };
 }
