@@ -34,6 +34,9 @@ const SNIPPETS: Array<{ id: string; family: string; source: string }> = [
   { id: "cm_cop", family: "copy_move", source: "COP(srcArr, dstArr, 10);" },
   { id: "cm_cps", family: "copy_move", source: "CPS(srcArr, dstArr, 10);" },
   { id: "cm_lim", family: "copy_move", source: "LIM(lo, val, hi);" },
+  // Bit set/clear (canonical_active): AB latch/unlatch → portable boolean assignment.
+  { id: "bit_set", family: "bit_operations", source: "OTL(MyBit);" },
+  { id: "bit_clear", family: "bit_operations", source: "OTU(MyBit);" },
 ];
 
 export const PARITY_FIXTURES: ParityFixture[] = SNIPPETS.flatMap((s) => [

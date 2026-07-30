@@ -51,7 +51,7 @@ export const DEFAULT_FAMILY_STATUS: Record<MigrationFamily, MigrationStatus> = {
   timers: "canonical_active",
   counters: "canonical_active",
   copy_move: "canonical_active",
-  bit_operations: "legacy_only",
+  bit_operations: "canonical_active",
   calls: "legacy_only",
   function_blocks: "legacy_only",
   ladder: "legacy_only",

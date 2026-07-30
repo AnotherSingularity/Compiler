@@ -11,7 +11,8 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
       expect(reg.isActive(f), f).toBe(true);
     }
     expect(reg.isActive("copy_move")).toBe(true);
-    for (const f of ["bit_operations", "calls", "function_blocks", "unsupported_manual_port", "ladder"] as const) {
+    expect(reg.isActive("bit_operations")).toBe(true);
+    for (const f of ["calls", "function_blocks", "unsupported_manual_port", "ladder"] as const) {
       expect(reg.isActive(f), f).toBe(false);
     }
   });

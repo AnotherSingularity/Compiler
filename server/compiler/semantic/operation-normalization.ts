@@ -53,6 +53,8 @@ const MNEMONIC_RULES: Record<string, MnemonicRule> = {
   MVM: { operation: "masked_move", disposition: "equivalent_lowering", roles: ["source", "mask", "dest"] },
   LIM: { operation: "limit_test", disposition: "equivalent_lowering", roles: ["low", "test", "high"] },
   LIMIT: { operation: "limit_test", disposition: "equivalent_lowering", roles: ["low", "test", "high"] },
+  OTL: { operation: "bit_set", disposition: "equivalent_lowering", roles: ["bit"] },
+  OTU: { operation: "bit_clear", disposition: "equivalent_lowering", roles: ["bit"] },
   MSG: { operation: "message_transfer", disposition: "unsupported", roles: ["message"] },
   PID: { operation: "pid_control", disposition: "manual_port", roles: ["loop"] },
   PIDE: { operation: "pid_control", disposition: "manual_port", roles: ["loop"] },

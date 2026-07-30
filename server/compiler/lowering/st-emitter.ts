@@ -136,6 +136,11 @@ function emitOperation(op: SemanticOperationNode, t: StEmitTarget, indent: strin
       return [`${indent}MVM(${argText});`];
     case "limit_test":
       return [`${indent}${mel ? "LIMIT" : "LIM"}(${argText});`];
+    // ── bit set/clear (AB latch/unlatch) → portable boolean assignment ───────
+    case "bit_set":
+      return [`${indent}${argText} := TRUE;`];
+    case "bit_clear":
+      return [`${indent}${argText} := FALSE;`];
     default:
       throw new UnsupportedByCanonicalEmitter(`semantic_operation:${op.operation}`);
   }
