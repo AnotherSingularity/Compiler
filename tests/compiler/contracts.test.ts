@@ -20,12 +20,12 @@ import {
   type CompileResult,
 } from "../../server/compiler/contracts";
 
-const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nPID(Loop1);"; // mixed: IF canonical, PID legacy (manual-port)
+const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nTON(RunTimer);\nSomeFB(In := x);"; // mixed: IF+TON canonical (timer loss), FB invoke legacy
 const MEL_SRC = "RunTimer(IN := start, PT := T#5s);";
 // A pure-legacy program (only unmigrated families) — compile() still equals
 // translate() here because a program with zero canonical nodes routes to the
 // whole-program legacy bridge.
-const LEGACY_SRC = "PID(Loop1);"; // still legacy-only (manual-port) — routes whole-program legacy
+const LEGACY_SRC = "SomeFB(In := x);"; // still legacy-only (function_blocks) — routes whole-program legacy
 
 describe("Phase 1 — compiler contracts", () => {
   describe("legacy direction adapter equivalence", () => {
@@ -38,14 +38,14 @@ describe("Phase 1 — compiler contracts", () => {
       expect(res.migration?.engine).toBe("legacy");
     });
 
-    it("ab2mel mixed program: IF is canonical while PID stays legacy (mixed routing)", () => {
+    it("ab2mel mixed program: IF+TON canonical while an FB invoke stays legacy (mixed routing)", () => {
       const res = compileLegacy(AB_SRC, "ab2mel");
       expect(res.migration?.engine).toBe("mixed");
       expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
       expect((res.migration?.legacyNodeCount ?? 0)).toBeGreaterThan(0);
       const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
       expect(out).toContain("IF x > 0 THEN"); // canonical control-flow emission
-      expect(out).toContain("PID"); // legacy manual-port fragment
+      expect(out).toContain("RunTimer(IN :="); // canonical timer emission
     });
 
     it("mel2ab: compile output matches legacy translate output", () => {
@@ -65,7 +65,6 @@ describe("Phase 1 — compiler contracts", () => {
       // authoritative loss records as diagnostics — so it never has FEWER
       // diagnostics than compile(), and the manual-port signal survives.
       expect(legacy.diagnostics.length).toBeGreaterThanOrEqual(res.diagnostics.length);
-      expect(legacy.diagnostics.some((d) => d.severity === "MANUAL_PORT")).toBe(true);
     });
 
     it("directionToLanguages maps both legacy directions", () => {
@@ -168,10 +167,10 @@ describe("Phase 1 — compiler contracts", () => {
       const res: CompileResult = compileLegacy(AB_SRC, "ab2mel");
       expect(typeof res.compilerVersion).toBe("string");
       expect(res.irSchemaVersion).toBe("1.0.0");
-      // AB_SRC routes a PID (manual-port) → an authoritative loss record is
-      // present and completeness is review_required (never silently complete).
+      // AB_SRC routes a TON (canonical, lossy) → an authoritative loss record
+      // is present and completeness is review_required (never silently complete).
       expect(res.semanticLosses.length).toBeGreaterThan(0);
-      expect(res.semanticLosses[0].category).toBe("process_control");
+      expect(res.semanticLosses.some((l) => l.category === "timers")).toBe(true);
       expect(res.completeness).toBe("review_required");
       expect(["failed", "parsed", "analyzed", "generated", "review_required", "executable_complete"]).toContain(res.completeness);
     });

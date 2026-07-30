@@ -71,7 +71,7 @@ describe("Stage 8 — runtime proof", () => {
   });
 
   it("a mixed program reports canonical AND legacy node counts internally", () => {
-    const res = compileLegacy("IF x THEN\n  y := 1;\nEND_IF;\nPID(Loop1);", "ab2mel");
+    const res = compileLegacy("IF x THEN\n  y := 1;\nEND_IF;\nSomeFB(In := x);", "ab2mel");
     expect(res.migration?.engine).toBe("mixed");
     expect(res.migration!.canonicalNodeCount).toBeGreaterThan(0);
     expect(res.migration!.legacyNodeCount).toBeGreaterThan(0);

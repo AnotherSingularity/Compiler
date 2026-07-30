@@ -829,3 +829,27 @@ mapped to the active `expressions` family with no emitter rule (would crash) —
 **Gate:** check 0 · test **230 passed/1 skipped** · verify:legacy-parity PASS (42, 0) ·
 verify:corpus-migration PASS (floor ratcheted) · verify:semantic-loss PASS · verify:capabilities
 PASS · corpus 7/7 · roundtrip 6/6 · build OK.
+
+## Typed Family Activation — Stages 11-13: bit_operations, calls, unsupported_manual_port
+
+**bit_operations** (canonical_active): OTL→`bit := TRUE;`, OTU→`bit := FALSE;` (portable IEC
+form; bit-of-word supported). Shifts (SHL/SHR) not guessed — pass through as opaque calls.
+
+**calls** (canonical_active): JSR→`routine();`, plain calls pass through. Motion (MAM/MAJ/MSO/
+MAFR/MAOC) → motion_command and AB flow (JMP/LBL/TND/SBR/RET) → unsupported, so activating calls
+never swallows an unsupported vendor instruction as an ordinary function call.
+
+**unsupported_manual_port** (canonical_active): the CANONICAL compiler now OWNS the manual-port
+decision for pid_control/message_transfer/motion_command/unsupported/vendor_extension — it emits
+a concise `(* MANUAL PORT: <mnemonic>(...) — no portable target equivalent; see the semantic-loss
+record *)` marker with the authoritative structured loss (comments are supplemental). PID/MSG/
+motion no longer route to the legacy emitter. tank_pid is now fully canonical (18/0, PID owned as
+manual-port); corpus snapshot + floor updated.
+
+**Now 11 families canonical_active.** Remaining legacy_only: function_blocks (fb_invoke — its
+ab2mel emission is empty in the legacy engine; needs instance-type-aware modeling), ladder
+(L5K path), project_metadata, hardware_mapping.
+
+**Gate:** check 0 · test **239 passed/1 skipped** · verify:legacy-parity PASS (50, 0) ·
+verify:corpus-migration PASS (floor ratcheted) · verify:semantic-loss PASS · verify:capabilities
+PASS · corpus 7/7 · roundtrip 6/6 · build OK.

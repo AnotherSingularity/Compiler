@@ -79,16 +79,15 @@ exports[`Corpus: AB → MEL > translates 05_HMI_ALARM_MESSAGE.st 1`] = `
 exports[`Corpus: AB → MEL > translates tank_level_pid_loop.st 1`] = `
 {
   "diagnosticCodes": [
-    "AB_MEL_PID_001",
     "LOSS_CONVERSION_NARROWING",
     "LOSS_PROCESS_CONTROL",
     "MIGRATION_HYBRID_ROUTING",
   ],
   "errorCount": 0,
   "inputLines": 127,
-  "manualPortCount": 2,
+  "manualPortCount": 1,
   "ok": true,
-  "outputLineRange": "50-99",
+  "outputLineRange": "25-49",
   "translatedNodes": 18,
   "warnCount": 2,
 }

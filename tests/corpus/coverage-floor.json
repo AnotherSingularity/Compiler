@@ -6,7 +6,7 @@
     "03_CHECK_SUM.st": { "direction": "ab2mel", "minCanonical": 8, "engine": "canonical", "minLosses": 0 },
     "04_FEN20_DATA_MOVE.st": { "direction": "ab2mel", "minCanonical": 22, "engine": "canonical", "minLosses": 1 },
     "05_HMI_ALARM_MESSAGE.st": { "direction": "ab2mel", "minCanonical": 2, "engine": "canonical", "minLosses": 0 },
-    "tank_level_pid_loop.st": { "direction": "ab2mel", "minCanonical": 17, "engine": "mixed", "minLosses": 3 },
+    "tank_level_pid_loop.st": { "direction": "ab2mel", "minCanonical": 18, "engine": "canonical", "minLosses": 3 },
     "runtime_basics.st": { "direction": "mel2ab", "minCanonical": 2, "engine": "mixed", "minLosses": 1 }
   }
 }

@@ -19,8 +19,8 @@ describe("calls — canonical activation", () => {
     expect(h.output).toBe("MyFunc(a, b);");
   });
 
-  it("a call stays canonical beside a legacy PID (mixed)", () => {
-    const h = ab("JSR(Sub);\nPID(Loop1);");
+  it("a call stays canonical beside a legacy FB invoke (mixed)", () => {
+    const h = ab("JSR(Sub);\nSomeFB(In := x);");
     expect(h.canonicalNodeCount).toBe(1);
     expect(h.legacyNodeCount).toBe(1);
     expect(h.output).toContain("Sub();");

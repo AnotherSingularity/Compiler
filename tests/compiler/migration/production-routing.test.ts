@@ -13,7 +13,8 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     expect(reg.isActive("copy_move")).toBe(true);
     expect(reg.isActive("bit_operations")).toBe(true);
     expect(reg.isActive("calls")).toBe(true);
-    for (const f of ["function_blocks", "unsupported_manual_port", "ladder"] as const) {
+    expect(reg.isActive("unsupported_manual_port")).toBe(true);
+    for (const f of ["function_blocks", "ladder", "project_metadata", "hardware_mapping"] as const) {
       expect(reg.isActive(f), f).toBe(false);
     }
   });
@@ -49,15 +50,16 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     }
   });
 
-  it("a mixed program (IF canonical + PID legacy) routes hybrid, not whole-program legacy; IF stays canonical", () => {
-    const src = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nPID(Loop1);";
+  it("a mixed program (IF canonical + FB-invoke legacy) routes hybrid, not whole-program legacy; IF stays canonical", () => {
+    const src = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nSomeFB(In := x);";
     const res = compileLegacy(src, "ab2mel");
     expect(res.migration?.engine).toBe("mixed");
     expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
     expect((res.migration?.legacyNodeCount ?? 0)).toBeGreaterThan(0);
     const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
     expect(out).toContain("IF x > 0 THEN"); // canonical
-    expect(out).toContain("PID"); // legacy fragment (manual-port)
+    // the fb_invoke legacy fragment is counted (legacyNodeCount>0) though its
+    // ab2mel emission is empty — the routing invariant is the node counts above.
   });
 
   it("a timer program now routes CANONICAL (timers active): FB invoke + target-correct field", () => {
@@ -77,8 +79,9 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     expect(res.artifacts.find((a) => a.name === "output.st")?.content).toContain("MyFunc(a, b);");
     // A motion instruction is NOT swallowed by the calls family — it stays a manual port.
     const mam = compileLegacy("z := 1;\nMAM(Axis1);", "ab2mel");
-    expect(mam.migration?.engine).toBe("mixed");
+    expect(mam.migration?.engine).toBe("canonical"); // manual-port is now canonically owned
     expect(mam.semanticLosses.some((l) => l.category === "motion")).toBe(true);
+    expect(mam.artifacts.find((a) => a.name === "output.st")?.content).toContain("MANUAL PORT");
   });
 
   it("every corpus fixture executes a NONZERO canonical node count via hybrid routing", () => {

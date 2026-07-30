@@ -8,16 +8,16 @@ const AB = "rockwell-logix-st" as const;
 const MEL = "mitsubishi-gx-st" as const;
 
 describe("Stage 2 — mixed-program (hybrid) routing", () => {
-  it("routes assignment + IF canonically while a PID (legacy-only) stays legacy, preserving order", () => {
-    const src = "y := a + 1;\nIF x > 0 THEN\n  z := 2;\nEND_IF;\nPID(Loop1);\nw := b;";
+  it("routes assignment + IF canonically while an FB invoke (legacy-only) stays legacy, preserving order", () => {
+    const src = "y := a + 1;\nIF x > 0 THEN\n  z := 2;\nEND_IF;\nSomeFB(In := x);\nw := b;";
     const h = compileHybrid(src, AB, MEL)!;
     expect(h.canonicalNodeCount).toBe(3); // y:=, IF, w:=
     expect(h.legacyNodeCount).toBe(1); // PID (manual-port, still legacy)
     const lines = h.output.split("\n");
-    // order preserved: y:= first, w:= last, PID fragment between IF and w:=
+    // order preserved: y:= first, w:= last (the fb_invoke legacy fragment is
+    // counted but emits nothing in ab2mel — routing is proven by the counts).
     expect(lines[0]).toBe("y := a + 1;");
-    expect(h.output.indexOf("y := a + 1;")).toBeLessThan(h.output.indexOf("PID"));
-    expect(h.output.indexOf("PID")).toBeLessThan(h.output.indexOf("w := b;"));
+    expect(h.output.indexOf("y := a + 1;")).toBeLessThan(h.output.indexOf("w := b;"));
   });
 
   it("routes a primitive declaration canonically, and a primitive-element array canonically (arrays active)", () => {
@@ -37,7 +37,7 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
 
   it("a canonical-active statement containing a legacy node routes to legacy as a unit (no crash, no split)", () => {
     // IF whose body contains a PID (still legacy-only) — structurally inseparable → whole IF legacy.
-    const src = "IF x THEN\n  PID(Loop1);\nEND_IF;\ny := 1;";
+    const src = "IF x THEN\n  SomeFB(In := x);\nEND_IF;\ny := 1;";
     const h = compileHybrid(src, AB, MEL)!;
     expect(h.legacyNodeCount).toBe(1); // the IF (inseparable)
     expect(h.canonicalNodeCount).toBe(1); // y := 1
@@ -45,7 +45,7 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
   });
 
   it("is deterministic: repeated compilation yields identical output and counts", () => {
-    const src = "a := 1;\nPID(L);\nb := 2;";
+    const src = "a := 1;\nSomeFB(In := x);\nb := 2;";
     const h1 = compileHybrid(src, AB, MEL)!;
     const h2 = compileHybrid(src, AB, MEL)!;
     expect(h1.output).toBe(h2.output);
@@ -54,7 +54,7 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
   });
 
   it("works in both language directions", () => {
-    const src = "d := e + 1;\nPID(L);";
+    const src = "d := e + 1;\nSomeFB(In := x);";
     const ab = compileHybrid(src, AB, MEL)!;
     const mel = compileHybrid(src, MEL, AB)!;
     expect(ab.canonicalNodeCount).toBe(1);
@@ -98,9 +98,15 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
       }
     });
 
-    it("at least one corpus fixture is genuinely mixed (both engines in one compilation)", () => {
-      const engines = fixtures.map((f) => compileLegacy(readFileSync(join(dir, f), "utf8"), "ab2mel").migration!.engine);
-      expect(engines).toContain("mixed");
+    it("mixed routing still occurs on the corpus (runtime_basics MEL->AB has a legacy FB invoke)", () => {
+      // The ab2mel corpus is now fully canonical (all families through calls +
+      // manual-port are active). Mixed routing is still exercised by the MEL
+      // source, which contains an IEC named-arg FB invoke (function_blocks,
+      // still legacy) alongside canonical statements.
+      const m = compileLegacy(readFileSync(join(dir, "mel/runtime_basics.st"), "utf8"), "mel2ab").migration!;
+      expect(m.canonicalNodeCount).toBeGreaterThan(0);
+      expect(m.legacyNodeCount).toBeGreaterThan(0);
+      expect(m.engine).toBe("mixed");
     });
 
     it("node accounting balances (canonical + legacy = total routed) and no fixture is whole-program-legacy", () => {

@@ -33,8 +33,8 @@ describe("copy_move — canonical activation", () => {
     expect(mel("LIM(lo, val, hi);").output).toBe("LIM(lo, val, hi);");
   });
 
-  it("a copy_move op stays canonical beside a legacy PID (mixed)", () => {
-    const h = ab("COP(a, b, 3);\nPID(Loop1);");
+  it("a copy_move op stays canonical beside a legacy FB invoke (mixed)", () => {
+    const h = ab("COP(a, b, 3);\nSomeFB(In := x);");
     expect(h.canonicalNodeCount).toBe(1);
     expect(h.legacyNodeCount).toBe(1);
     expect(h.output).toContain("BMOV(a, b, 3);");

@@ -58,8 +58,8 @@ describe("Conversion recognition + lowering", () => {
     }
   });
 
-  it("stays canonical beside a legacy PID (mixed) and records a conversion loss", () => {
-    const h = compileHybrid("r := DINT_TO_REAL(n) + 1.0;\nPID(Loop1);", AB, MEL)!;
+  it("stays canonical beside a legacy FB invoke (mixed) and records a conversion loss", () => {
+    const h = compileHybrid("r := DINT_TO_REAL(n) + 1.0;\nSomeFB(In := x);", AB, MEL)!;
     expect(h.canonicalNodeCount).toBe(1); // the conversion assignment
     expect(h.legacyNodeCount).toBe(1); // the PID (still legacy)
     const cats = h.losses.map((l) => l.category);

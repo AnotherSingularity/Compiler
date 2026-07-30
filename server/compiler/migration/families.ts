@@ -57,7 +57,7 @@ export const DEFAULT_FAMILY_STATUS: Record<MigrationFamily, MigrationStatus> = {
   ladder: "legacy_only",
   project_metadata: "legacy_only",
   hardware_mapping: "legacy_only",
-  unsupported_manual_port: "legacy_only",
+  unsupported_manual_port: "canonical_active",
 };
 
 export class MigrationRegistry {

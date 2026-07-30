@@ -144,6 +144,16 @@ function emitOperation(op: SemanticOperationNode, t: StEmitTarget, indent: strin
       return [`${indent}${argText} := TRUE;`];
     case "bit_clear":
       return [`${indent}${argText} := FALSE;`];
+    // ── unsupported / manual-port (canonical compiler OWNS the decision) ─────
+    // A concise, canonical manual-port marker; the AUTHORITATIVE detail lives in
+    // the structured semantic-loss record (comments are supplemental).
+    case "pid_control":
+    case "message_transfer":
+    case "motion_command":
+    case "unsupported": {
+      const mnem = op.vendorAnnotations?.mnemonic ?? op.operation;
+      return [`${indent}(* MANUAL PORT: ${mnem}(${argText}) — no portable target equivalent; see the semantic-loss record for required actions. *)`];
+    }
     default:
       throw new UnsupportedByCanonicalEmitter(`semantic_operation:${op.operation}`);
   }
@@ -236,6 +246,10 @@ function emitStatement(stmt: Statement, t: StEmitTarget, indent: string): string
     case "call": return [`${indent}${stmt.name}(${stmt.args.map((a) => emitExpression(a, t)).join(", ")});`];
     case "noop": return [`${indent}(* ${stmt.reason} *)`];
     case "semantic_operation": return emitOperation(stmt, t, indent);
+    case "vendor_extension_stmt":
+      return [`${indent}(* MANUAL PORT: vendor extension ${stmt.vendorName}(${stmt.rawArgs.join(", ")}) — no portable target equivalent; see the semantic-loss record. *)`];
+    case "unsupported_stmt":
+      return [`${indent}(* MANUAL PORT: ${stmt.reason}; see the semantic-loss record. *)`];
     default:
       throw new UnsupportedByCanonicalEmitter(stmt.node);
   }

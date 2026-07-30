@@ -21,8 +21,8 @@ describe("bit_operations — canonical activation", () => {
     expect(ab("OTL(Flags.3);").output).toBe("Flags.3 := TRUE;");
   });
 
-  it("stays canonical beside a legacy PID (mixed)", () => {
-    const h = ab("OTL(A);\nPID(Loop1);");
+  it("stays canonical beside a legacy FB invoke (mixed)", () => {
+    const h = ab("OTL(A);\nSomeFB(In := x);");
     expect(h.canonicalNodeCount).toBe(1);
     expect(h.legacyNodeCount).toBe(1);
     expect(h.output).toContain("A := TRUE;");
