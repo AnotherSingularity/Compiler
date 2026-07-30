@@ -85,7 +85,7 @@ function mitsubishiTargetManifest(): CapabilityManifest {
       CounterUp: { level: "conditional", disposition: "lossy", requiresManualCompletion: true },
       CounterDown: { level: "conditional", disposition: "lossy", requiresManualCompletion: true },
       BlockCopy: { level: "conditional", disposition: "equivalent_lowering", differences: ["confirm MEL block-move primitive"] },
-      SynchronousBlockCopy: { level: "conditional", disposition: "equivalent_lowering", differences: ["CPS synchronous copy → MEL block-move; confirm atomicity semantics"] },
+      SynchronousBlockCopy: { level: "conditional", disposition: "lossy", differences: ["CPS synchronous/atomic copy → MEL block-move is NOT atomic; concurrent access during the copy may observe a torn value"], requiresManualCompletion: true, diagnosticCode: "AB_MEL_CPS_001" },
       MaskedMove: { level: "conditional", disposition: "equivalent_lowering", differences: ["MVM masked move → MEL AND/OR mask sequence; confirm mask semantics"] },
       PIDControl: { level: "manual", disposition: "manual_port", requiresManualCompletion: true, diagnosticCode: "AB_MEL_PID_001" },
       MotionCommand: { level: "unsupported", disposition: "unsupported", diagnosticCode: "AB_MEL_MOTION_001" },

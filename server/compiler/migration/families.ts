@@ -50,7 +50,7 @@ export const DEFAULT_FAMILY_STATUS: Record<MigrationFamily, MigrationStatus> = {
   conversions: "canonical_active",
   timers: "canonical_active",
   counters: "canonical_active",
-  copy_move: "legacy_only",
+  copy_move: "canonical_active",
   bit_operations: "legacy_only",
   calls: "legacy_only",
   function_blocks: "legacy_only",
@@ -90,7 +90,7 @@ function familyOfOperation(op: SemanticOperationNode["operation"]): MigrationFam
   if (op.startsWith("counter_")) return "counters";
   if (op === "block_copy" || op === "synchronous_block_copy" || op === "masked_move") return "copy_move";
   if (op === "bit_set" || op === "bit_clear" || op === "shift_left" || op === "shift_right") return "bit_operations";
-  if (op === "limit_test") return "expressions";
+  if (op === "limit_test") return "copy_move";
   if (op === "routine_call") return "calls";
   if (op === "read_input" || op === "write_output") return "hardware_mapping";
   if (op === "pid_control" || op === "message_transfer" || op === "motion_command") return "unsupported_manual_port";

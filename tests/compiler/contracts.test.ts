@@ -25,7 +25,7 @@ const MEL_SRC = "RunTimer(IN := start, PT := T#5s);";
 // A pure-legacy program (only unmigrated families) — compile() still equals
 // translate() here because a program with zero canonical nodes routes to the
 // whole-program legacy bridge.
-const LEGACY_SRC = "COP(src, dst, 10);";
+const LEGACY_SRC = "PID(Loop1);"; // still legacy-only (manual-port) — routes whole-program legacy
 
 describe("Phase 1 — compiler contracts", () => {
   describe("legacy direction adapter equivalence", () => {
@@ -58,10 +58,14 @@ describe("Phase 1 — compiler contracts", () => {
       expect(res.targetLanguage).toBe("rockwell-logix-st");
     });
 
-    it("diagnostic count is preserved through the adapter for a pure-legacy program", () => {
+    it("the adapter carries every compile diagnostic through and enriches with loss records", () => {
       const legacy = translate(LEGACY_SRC, "ab2mel");
       const res = compileLegacy(LEGACY_SRC, "ab2mel");
-      expect(res.diagnostics.length).toBe(legacy.diagnostics.length);
+      // translate() reshapes the CompileResult and additionally surfaces the
+      // authoritative loss records as diagnostics — so it never has FEWER
+      // diagnostics than compile(), and the manual-port signal survives.
+      expect(legacy.diagnostics.length).toBeGreaterThanOrEqual(res.diagnostics.length);
+      expect(legacy.diagnostics.some((d) => d.severity === "MANUAL_PORT")).toBe(true);
     });
 
     it("directionToLanguages maps both legacy directions", () => {

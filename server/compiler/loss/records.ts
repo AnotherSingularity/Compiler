@@ -45,6 +45,13 @@ const OP_PROFILES: Partial<Record<SemanticOperationKind, OpLossProfile>> = {
   timer_retentive: timerProfile("retentive"),
   counter_up: counterProfile("up"),
   counter_down: counterProfile("down"),
+  synchronous_block_copy: {
+    category: "copy_move_atomicity",
+    sourceSemantics: ["CPS performs a synchronous/atomic block copy (no interruption mid-copy)"],
+    targetSemantics: ["target block-move (BMOV) is not guaranteed atomic"],
+    requiredAction: "Confirm no concurrent task reads the destination mid-copy, or add a target-specific atomic/lock mechanism.",
+    describe: (m) => `Synchronous block copy (${m}) lowered to a non-atomic block move — atomicity is not preserved.`,
+  },
   counter_reset: {
     category: "counters",
     sourceSemantics: ["RES resets accumulator to zero for a timer or counter instance"],

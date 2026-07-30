@@ -107,9 +107,11 @@ export function emitExpression(expr: Expression, _t: StEmitTarget): string {
  * loss record carrying the review requirement. Reset operations emit the target
  * reset mechanism for the resolved instance kind.
  */
-function emitOperation(op: SemanticOperationNode, indent: string): string[] {
+function emitOperation(op: SemanticOperationNode, t: StEmitTarget, indent: string): string[] {
   const instArg = op.args.find((a) => a.role === "timer" || a.role === "counter" || a.role === "arg0");
   const inst = instArg && instArg.value.node === "symbol_ref" ? instArg.value.name : "UNKNOWN_INSTANCE";
+  const mel = t.language === "mitsubishi-gx-st";
+  const argText = op.args.map((a) => emitExpression(a.value, t)).join(", ");
   switch (op.operation) {
     case "timer_on_delay":
     case "timer_off_delay":
@@ -123,6 +125,17 @@ function emitOperation(op: SemanticOperationNode, indent: string): string[] {
       return [`${indent}${inst}(IN := FALSE); (* timer reset *)`];
     case "counter_reset":
       return [`${indent}${inst}(R := TRUE); (* counter reset *)`];
+    // ── copy/move family (target-specific block-move primitive) ──────────────
+    case "block_copy":
+      return [`${indent}${mel ? "BMOV" : "COP"}(${argText});`];
+    case "synchronous_block_copy":
+      // CPS is a synchronous/atomic copy; the target block-move is not atomic —
+      // the authoritative loss record carries the atomicity review requirement.
+      return [`${indent}${mel ? "BMOV" : "CPS"}(${argText});`];
+    case "masked_move":
+      return [`${indent}MVM(${argText});`];
+    case "limit_test":
+      return [`${indent}${mel ? "LIMIT" : "LIM"}(${argText});`];
     default:
       throw new UnsupportedByCanonicalEmitter(`semantic_operation:${op.operation}`);
   }
@@ -213,7 +226,7 @@ function emitStatement(stmt: Statement, t: StEmitTarget, indent: string): string
     case "exit": return [`${indent}EXIT;`];
     case "continue": return [`${indent}CONTINUE;`];
     case "noop": return [`${indent}(* ${stmt.reason} *)`];
-    case "semantic_operation": return emitOperation(stmt, indent);
+    case "semantic_operation": return emitOperation(stmt, t, indent);
     default:
       throw new UnsupportedByCanonicalEmitter(stmt.node);
   }

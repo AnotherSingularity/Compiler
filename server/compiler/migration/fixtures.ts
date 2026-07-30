@@ -29,6 +29,11 @@ const SNIPPETS: Array<{ id: string; family: string; source: string }> = [
   { id: "tmr_on", family: "timers", source: "TON(RunTimer);\nx := RunTimer.DN;" },
   { id: "ctr_up", family: "counters", source: "CTU(MyCtr);\ndone := MyCtr.DN;\ncur := MyCtr.ACC;" },
   { id: "res_typed", family: "counters", source: "CTU(C);\nRES(C);" },
+  // Copy/move (canonical_active): target block-move primitive; CPS carries an
+  // atomicity loss; LIM lowers to LIMIT.
+  { id: "cm_cop", family: "copy_move", source: "COP(srcArr, dstArr, 10);" },
+  { id: "cm_cps", family: "copy_move", source: "CPS(srcArr, dstArr, 10);" },
+  { id: "cm_lim", family: "copy_move", source: "LIM(lo, val, hi);" },
 ];
 
 export const PARITY_FIXTURES: ParityFixture[] = SNIPPETS.flatMap((s) => [

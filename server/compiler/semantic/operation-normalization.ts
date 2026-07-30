@@ -49,7 +49,7 @@ const MNEMONIC_RULES: Record<string, MnemonicRule> = {
   CTD: { operation: "counter_down", disposition: "lossy", roles: ["counter", "preset", "accum"] },
   COP: { operation: "block_copy", disposition: "equivalent_lowering", roles: ["source", "dest", "count"] },
   BMOV: { operation: "block_copy", disposition: "equivalent_lowering", roles: ["source", "dest", "count"] },
-  CPS: { operation: "synchronous_block_copy", disposition: "equivalent_lowering", roles: ["source", "dest", "count"] },
+  CPS: { operation: "synchronous_block_copy", disposition: "lossy", roles: ["source", "dest", "count"] },
   MVM: { operation: "masked_move", disposition: "equivalent_lowering", roles: ["source", "mask", "dest"] },
   LIM: { operation: "limit_test", disposition: "equivalent_lowering", roles: ["low", "test", "high"] },
   LIMIT: { operation: "limit_test", disposition: "equivalent_lowering", roles: ["low", "test", "high"] },

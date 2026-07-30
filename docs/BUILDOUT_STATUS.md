@@ -809,3 +809,23 @@ fixture missing from the floor. No wildcard approvals — every fixture is pinne
 
 **Gate:** check 0 · test 225/1 skipped · verify:legacy-parity PASS (36,0) · verify:corpus-migration
 PASS (floor enforced) · verify:semantic-loss PASS · corpus 7/7 · roundtrip 6/6 · build OK.
+
+## Typed Family Activation — Stage 10: copy_move canonical-active
+
+**Files:** `lowering/st-emitter.ts` (block_copy/synchronous_block_copy/masked_move/limit_test
+emission, target-aware); `migration/families.ts` (`limit_test` regrouped from expressions →
+copy_move, fixing a latent emitter crash; `copy_move = canonical_active`);
+`semantic/operation-normalization.ts` (CPS disposition lossy); `languages/rockwell.ts`
+(SynchronousBlockCopy lossy + atomicity note); `loss/records.ts` (copy_move_atomicity profile);
+`migration/{fixtures,approvals}.ts` (3 fixtures, all byte-identical to legacy);
+`tests/compiler/semantic/copy-move.test.ts`; coverage floor ratcheted (04_FEN20 → 22 canonical/
+engine canonical; runtime_basics → 2).
+
+**Result:** COP↔BMOV, CPS→BMOV (with a structured `copy_move_atomicity` loss — CPS is atomic,
+BMOV is not; never a silent equivalent), MVM passthrough, LIM→LIMIT (AB target keeps LIM). All
+6 parity fixtures byte-identical to the oracle. Fixed a latent bug: a standalone `LIM(...)` was
+mapped to the active `expressions` family with no emitter rule (would crash) — now copy_move.
+
+**Gate:** check 0 · test **230 passed/1 skipped** · verify:legacy-parity PASS (42, 0) ·
+verify:corpus-migration PASS (floor ratcheted) · verify:semantic-loss PASS · verify:capabilities
+PASS · corpus 7/7 · roundtrip 6/6 · build OK.
