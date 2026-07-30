@@ -59,6 +59,20 @@ const MNEMONIC_RULES: Record<string, MnemonicRule> = {
   PID: { operation: "pid_control", disposition: "manual_port", roles: ["loop"] },
   PIDE: { operation: "pid_control", disposition: "manual_port", roles: ["loop"] },
   JSR: { operation: "routine_call", disposition: "exact", roles: ["routine"] },
+  // Motion instructions — no portable equivalent (manual port). Mapping them
+  // here keeps them OUT of the generic `calls` family so activating calls never
+  // swallows an unsupported motion instruction as an ordinary function call.
+  MAM: { operation: "motion_command", disposition: "manual_port", roles: ["axis"] },
+  MAJ: { operation: "motion_command", disposition: "manual_port", roles: ["axis"] },
+  MSO: { operation: "motion_command", disposition: "manual_port", roles: ["axis"] },
+  MAFR: { operation: "motion_command", disposition: "manual_port", roles: ["axis"] },
+  MAOC: { operation: "motion_command", disposition: "manual_port", roles: ["axis"] },
+  // AB flow-control with no clean ST equivalent — manual port.
+  JMP: { operation: "unsupported", disposition: "manual_port", roles: ["label"] },
+  LBL: { operation: "unsupported", disposition: "manual_port", roles: ["label"] },
+  TND: { operation: "unsupported", disposition: "manual_port", roles: [] },
+  SBR: { operation: "unsupported", disposition: "manual_port", roles: [] },
+  RET: { operation: "unsupported", disposition: "manual_port", roles: [] },
 };
 
 export function mnemonicRule(name: string): MnemonicRule | undefined {

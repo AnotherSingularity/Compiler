@@ -37,6 +37,9 @@ const SNIPPETS: Array<{ id: string; family: string; source: string }> = [
   // Bit set/clear (canonical_active): AB latch/unlatch → portable boolean assignment.
   { id: "bit_set", family: "bit_operations", source: "OTL(MyBit);" },
   { id: "bit_clear", family: "bit_operations", source: "OTU(MyBit);" },
+  // Calls (canonical_active): JSR → portable routine call; plain calls pass through.
+  { id: "call_plain", family: "calls", source: "MyFunc(a, b);" },
+  { id: "call_jsr", family: "calls", source: "JSR(MySubroutine);" },
 ];
 
 export const PARITY_FIXTURES: ParityFixture[] = SNIPPETS.flatMap((s) => [

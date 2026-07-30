@@ -108,7 +108,7 @@ export function emitExpression(expr: Expression, _t: StEmitTarget): string {
  * reset mechanism for the resolved instance kind.
  */
 function emitOperation(op: SemanticOperationNode, t: StEmitTarget, indent: string): string[] {
-  const instArg = op.args.find((a) => a.role === "timer" || a.role === "counter" || a.role === "arg0");
+  const instArg = op.args.find((a) => a.role === "timer" || a.role === "counter" || a.role === "routine" || a.role === "arg0");
   const inst = instArg && instArg.value.node === "symbol_ref" ? instArg.value.name : "UNKNOWN_INSTANCE";
   const mel = t.language === "mitsubishi-gx-st";
   const argText = op.args.map((a) => emitExpression(a.value, t)).join(", ");
@@ -125,6 +125,9 @@ function emitOperation(op: SemanticOperationNode, t: StEmitTarget, indent: strin
       return [`${indent}${inst}(IN := FALSE); (* timer reset *)`];
     case "counter_reset":
       return [`${indent}${inst}(R := TRUE); (* counter reset *)`];
+    case "routine_call":
+      // JSR(routine) → a portable routine/function call.
+      return [`${indent}${inst}();`];
     // ── copy/move family (target-specific block-move primitive) ──────────────
     case "block_copy":
       return [`${indent}${mel ? "BMOV" : "COP"}(${argText});`];
@@ -230,6 +233,7 @@ function emitStatement(stmt: Statement, t: StEmitTarget, indent: string): string
     case "return": return [`${indent}RETURN;`];
     case "exit": return [`${indent}EXIT;`];
     case "continue": return [`${indent}CONTINUE;`];
+    case "call": return [`${indent}${stmt.name}(${stmt.args.map((a) => emitExpression(a, t)).join(", ")});`];
     case "noop": return [`${indent}(* ${stmt.reason} *)`];
     case "semantic_operation": return emitOperation(stmt, t, indent);
     default:

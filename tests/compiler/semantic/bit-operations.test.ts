@@ -28,10 +28,10 @@ describe("bit_operations — canonical activation", () => {
     expect(h.output).toContain("A := TRUE;");
   });
 
-  it("shift instructions are NOT guessed — they remain on the legacy engine", () => {
-    // SHL/SHR are not mapped (target form is dialect-specific); routed legacy verbatim.
+  it("shift instructions are NOT given fabricated canonical semantics — they pass through unchanged", () => {
+    // SHL/SHR have dialect-specific target forms we do not guess; they flow
+    // through as opaque calls, emitted verbatim exactly as the legacy oracle does.
     const h = ab("SHL(word, 2, result);");
-    expect(h.legacyNodeCount).toBeGreaterThan(0);
-    expect(h.output).toContain("SHL");
+    expect(h.output).toBe("SHL(word, 2, result);");
   });
 });

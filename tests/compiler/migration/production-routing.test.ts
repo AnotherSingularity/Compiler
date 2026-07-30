@@ -12,7 +12,8 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     }
     expect(reg.isActive("copy_move")).toBe(true);
     expect(reg.isActive("bit_operations")).toBe(true);
-    for (const f of ["calls", "function_blocks", "unsupported_manual_port", "ladder"] as const) {
+    expect(reg.isActive("calls")).toBe(true);
+    for (const f of ["function_blocks", "unsupported_manual_port", "ladder"] as const) {
       expect(reg.isActive(f), f).toBe(false);
     }
   });
@@ -70,10 +71,14 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     expect(res.completeness).toBe("review_required");
   });
 
-  it("a mixed program with a function call keeps the assignment canonical and the call legacy", () => {
+  it("a plain function/routine call is canonical (calls active); a motion instruction stays manual-port", () => {
     const res = compileLegacy("z := 1;\nMyFunc(a, b);", "ab2mel");
-    expect(res.migration?.engine).toBe("mixed");
-    expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
+    expect(res.migration?.engine).toBe("canonical"); // both the assignment and the call are canonical
+    expect(res.artifacts.find((a) => a.name === "output.st")?.content).toContain("MyFunc(a, b);");
+    // A motion instruction is NOT swallowed by the calls family — it stays a manual port.
+    const mam = compileLegacy("z := 1;\nMAM(Axis1);", "ab2mel");
+    expect(mam.migration?.engine).toBe("mixed");
+    expect(mam.semanticLosses.some((l) => l.category === "motion")).toBe(true);
   });
 
   it("every corpus fixture executes a NONZERO canonical node count via hybrid routing", () => {
