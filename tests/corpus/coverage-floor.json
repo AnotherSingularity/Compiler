@@ -1,0 +1,12 @@
+{
+  "_comment": "Version-controlled corpus-migration coverage floor (Stage 9). Minimum canonical coverage per fixture; the verifier fails on any regression below these values, on whole-program-legacy routing, on node-accounting imbalance, or on a dropped required loss record. Raise these numbers as families activate — never lower them without an explicit, reviewed reason. No wildcard approvals.",
+  "fixtures": {
+    "01_ARRAY100_AVERAGE.st": { "direction": "ab2mel", "minCanonical": 5, "engine": "canonical", "minLosses": 0 },
+    "02_ARRAY2000_AVERAGE.st": { "direction": "ab2mel", "minCanonical": 5, "engine": "canonical", "minLosses": 0 },
+    "03_CHECK_SUM.st": { "direction": "ab2mel", "minCanonical": 8, "engine": "canonical", "minLosses": 0 },
+    "04_FEN20_DATA_MOVE.st": { "direction": "ab2mel", "minCanonical": 20, "engine": "mixed", "minLosses": 1 },
+    "05_HMI_ALARM_MESSAGE.st": { "direction": "ab2mel", "minCanonical": 2, "engine": "canonical", "minLosses": 0 },
+    "tank_level_pid_loop.st": { "direction": "ab2mel", "minCanonical": 17, "engine": "mixed", "minLosses": 3 },
+    "runtime_basics.st": { "direction": "mel2ab", "minCanonical": 1, "engine": "mixed", "minLosses": 1 }
+  }
+}

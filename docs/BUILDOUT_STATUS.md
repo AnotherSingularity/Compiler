@@ -795,3 +795,17 @@ verify:legacy-parity PASS (36, 0) · verify:corpus-migration PASS (7, 3 mixed) �
 verify:semantic-loss PASS · verify:capabilities PASS · corpus 7/7 · roundtrip 6/6 · build OK.
 
 **Minimum boundary items 1-9 now COMPLETE.**
+
+## Typed Family Activation — Stage 9: corpus-migration coverage floor
+
+**Files:** `tests/corpus/coverage-floor.json` (version-controlled per-fixture minimums);
+`scripts/verify-corpus-migration.ts` (enforces the floor).
+
+**Result:** `verify:corpus-migration` now fails on ANY regression: canonical node count below a
+fixture's recorded minimum, engine regressing to whole-program legacy, node-accounting
+imbalance (canonical + legacy != translatedNodes), a dropped required loss record, or a corpus
+fixture missing from the floor. No wildcard approvals — every fixture is pinned. Current floor:
+01/02=5, 03=8, 04=20(mixed,≥1 loss), 05=2, tank_pid=17(mixed,≥3 loss), runtime_basics=1(mixed,≥1 loss).
+
+**Gate:** check 0 · test 225/1 skipped · verify:legacy-parity PASS (36,0) · verify:corpus-migration
+PASS (floor enforced) · verify:semantic-loss PASS · corpus 7/7 · roundtrip 6/6 · build OK.
