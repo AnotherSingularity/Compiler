@@ -559,3 +559,44 @@ deferred to keep this commit verified and bounded).
 
 This is the reconciled base for the Typed Semantic Core / Loss Enforcement / Legacy-API
 Migration order. Work proceeds in small verified commits from here.
+
+---
+
+## Typed Semantic Core — Stage 1: scope/symbol/type resolution + conversion analysis
+
+**Commit:** `d25c349`
+
+**Files:** `server/compiler/semantic/{scopes,types,conversions,resolver,index}.ts`;
+`migration/hybrid.ts` (resolveProgram wired after operation normalization);
+`tests/compiler/semantic/typed-core.test.ts`.
+
+**Result:** A deterministic, pure typed semantic core, CONNECTED to ordinary compilation.
+`resolveProgram` resolves `symbol_ref → (symbolId = declaring node id, declared type)` and
+propagates canonical types through member/array/unary/binary/comparison/logical/range; it
+NEVER fabricates a resolved type (undeclared identifier stays unresolved; any expression over
+an unresolved operand stays unresolved). `classifyConversion` assigns ConversionSafety
+conservatively (IEEE754 exact-int range drives int→real widening vs precision_loss). Output is
+neutral for active families (they format names/raw, not types), so parity/corpus are unchanged.
+
+## Typed Semantic Core — Stage 2: structured semantic-loss records + honest completeness
+
+**Files:** `server/compiler/loss/{records,index}.ts`; `migration/hybrid.ts` (collects
+program losses); `registry/orchestrator.ts` (populates `semanticLosses`, derives
+`completeness`, real `manualPortCount`/`warningCount`); `scripts/verify-semantic-loss.ts`;
+`package.json` (`verify:semantic-loss`); `tests/compiler/semantic/loss-records.test.ts`;
+`tests/compiler/contracts.test.ts` (honest assertion: AB_SRC's TON → loss + review_required).
+
+**Result:** `CompileResult.semanticLosses` is now AUTHORITATIVE and never dishonestly empty.
+Losses are classified from a node's disposition (lossy/manual_port/unsupported/synthesized),
+never re-guessed; behavior-preserving dispositions (exact/equivalent_lowering) are NOT losses.
+`completeness` is DERIVED from the records — a program carrying any real loss can never report
+`executable_complete`. New `verify:semantic-loss` gate proves loss records and completeness
+agree across the corpus.
+
+**Corpus honesty report:** 01/02/03/05 executable_complete (0 losses) · 04_FEN20 & tank_pid
+review_required (1 loss each; tank_pid manualPort=1 PID) · runtime_basics generated (legacy
+equivalent-lowerings, 0 losses). 2 fixtures carry structured loss records.
+
+**Gate:** check 0 · test **186 passed, 1 skipped** · verify:legacy-parity PASS (20,0) ·
+verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS (7, 2 with losses) ·
+corpus 7/7 · roundtrip 6/6 · build OK.

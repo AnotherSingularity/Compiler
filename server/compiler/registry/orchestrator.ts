@@ -22,6 +22,7 @@ import {
 } from "../contracts";
 import type { LanguageRegistry } from "./registry";
 import { compileHybrid } from "../migration/hybrid";
+import { completenessFromLosses } from "../loss/records";
 
 function fail(
   request: CompileRequest,
@@ -118,21 +119,29 @@ export function compileWithRegistry(request: CompileRequest, registry: LanguageR
       { kind: "structured_text", language: request.targetLanguage, name: "output.st", content: hybrid.output },
     ];
     const engine = hybrid.legacyNodeCount > 0 ? "mixed" : "canonical";
+    // Completeness is DERIVED from the authoritative loss records — a program
+    // that carries any real semantic loss can never report executable_complete.
+    const manualPortCount = hybrid.losses.filter((l) => l.disposition === "manual_port" || l.disposition === "unsupported").length;
+    const completeness = completenessFromLosses(hybrid.losses, {
+      hasError: false,
+      outputEmpty: hybrid.output.trim() === "",
+      legacyNodeCount: hybrid.legacyNodeCount,
+    });
     return {
       ok: true,
-      completeness: hybrid.legacyNodeCount > 0 ? "review_required" : "executable_complete",
+      completeness,
       compilerVersion: COMPILER_VERSION,
       irSchemaVersion: IR_SCHEMA_VERSION,
       sourceLanguage: resolvedSource,
       targetLanguage: request.targetLanguage,
       artifacts,
       diagnostics: hybrid.diagnostics,
-      semanticLosses: [],
+      semanticLosses: hybrid.losses,
       stats: {
         inputLines: source.split("\n").length,
         outputLines: hybrid.outputLines,
-        warningCount: 0,
-        manualPortCount: 0,
+        warningCount: hybrid.losses.length - manualPortCount,
+        manualPortCount,
         errorCount: 0,
         translatedNodes: hybrid.canonicalNodeCount + hybrid.legacyNodeCount,
       },

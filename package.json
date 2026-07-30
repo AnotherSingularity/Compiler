@@ -20,6 +20,7 @@
     "test:migration": "vitest run tests/compiler/migration",
     "verify:legacy-parity": "tsx scripts/verify-legacy-parity.ts",
     "verify:corpus-migration": "tsx scripts/verify-corpus-migration.ts",
+    "verify:semantic-loss": "tsx scripts/verify-semantic-loss.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "android": "expo start --android",
     "ios": "expo start --ios",

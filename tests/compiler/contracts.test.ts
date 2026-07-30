@@ -164,7 +164,11 @@ describe("Phase 1 — compiler contracts", () => {
       const res: CompileResult = compileLegacy(AB_SRC, "ab2mel");
       expect(typeof res.compilerVersion).toBe("string");
       expect(res.irSchemaVersion).toBe("1.0.0");
-      expect(res.semanticLosses).toEqual([]);
+      // AB_SRC routes a TON (lossy) to legacy → an authoritative loss record is
+      // present and completeness is review_required (never silently complete).
+      expect(res.semanticLosses.length).toBeGreaterThan(0);
+      expect(res.semanticLosses[0].category).toBe("timers");
+      expect(res.completeness).toBe("review_required");
       expect(["failed", "parsed", "analyzed", "generated", "review_required", "executable_complete"]).toContain(res.completeness);
     });
 

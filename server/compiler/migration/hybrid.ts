@@ -15,7 +15,8 @@
  */
 import type { LanguageId } from "../contracts/ids";
 import type { CompilerDiagnostic } from "../contracts/diagnostics";
-import type { MigrationExecutionSummary } from "../contracts/compile";
+import type { MigrationExecutionSummary, SemanticLossRecord } from "../contracts/compile";
+import { collectProgramLosses } from "../loss/records";
 import { parseSTSourceWithDiagnostics, type ASTNode } from "../parser";
 import { emitMEL } from "../emitter";
 import { emitAB } from "../emitter-ab";
@@ -44,6 +45,8 @@ export interface HybridResult {
   summary: MigrationExecutionSummary;
   familyExecution: Record<string, { canonical: number; legacy: number }>;
   outputLines: number;
+  /** Structured semantic-loss records for the whole program (authoritative). */
+  losses: SemanticLossRecord[];
 }
 
 /** Direction of the legacy emitter for a target language. */
@@ -164,6 +167,8 @@ export function compileHybrid(
     engine: engineLabel,
   };
 
+  const losses = collectProgramLosses(program, { sourceLanguage, targetLanguage });
+
   return {
     output,
     diagnostics,
@@ -174,5 +179,6 @@ export function compileHybrid(
     summary,
     familyExecution,
     outputLines: output === "" ? 0 : output.split("\n").length,
+    losses,
   };
 }
