@@ -736,3 +736,31 @@ classified `semantic_loss_now_explicit`.
 **Gate:** check 0 · test **218 passed/1 skipped** · verify:legacy-parity PASS (36, 0) ·
 verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
 PASS · corpus 7/7 · roundtrip 6/6 · build OK.
+
+## Typed Family Activation — checkpoint status (HEAD e1ad056)
+
+**Minimum-boundary items 1-7 COMPLETE and pushed** (conversions + arrays + timer/counter
+fields + timers + counters + typed RES + no-fake-zero-preset, all with authoritative capability
+dispositions and structured loss records). 8 families are now canonical_active:
+expressions, assignments, control_flow, declarations, arrays_structures, conversions, timers,
+counters.
+
+**Local full gate GREEN on a fresh `--frozen-lockfile` install:** check 0 · test 218/1 skipped
+· test:ir 45 · test:semantic (incl. conversions/arrays/timers/counters/capability/loss) ·
+test:migration · verify:legacy-parity PASS (36, 0) · verify:corpus-migration PASS (7, 3 mixed)
+· verify:semantic-loss PASS · verify:capabilities PASS · corpus 7/7 · roundtrip 6/6 · build OK.
+
+**CI note (runs 18-19, arrays+timers):** the CI job fails at ~5-10s — before `pnpm check`
+(which alone takes longer than the whole failed run) — i.e. during runner setup / install, not
+in compiler code. Runs 13-17 passed on the same unchanged workflow; the code is green locally
+including a fresh frozen-lockfile install; a manual re-run reproduced the identical ~5s setup
+failure. This is a GitHub Actions infrastructure/runner condition (most likely Actions-minutes
+exhaustion), not a code regression. Not treated as a compiler failure.
+
+**Remaining (minimum-boundary items 8-9 + downstream):** route `translate()` through the
+registry/pipeline and isolate the whole-program legacy engine as `translateLegacyForParity`
+(parity-only). This rewrites the PROTECTED/FROZEN baseline surface (corpus snapshot, roundtrip,
+translate.test all assert the legacy `translate()` output), so it is a deliberate baseline
+migration to be executed as a dedicated, carefully-verified unit. Then: copy_move,
+bit_operations, calls, function_blocks, unsupported_manual_port, ladder canonicalization, L5K
+project linking.
