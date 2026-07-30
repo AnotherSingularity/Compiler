@@ -764,3 +764,34 @@ translate.test all assert the legacy `translate()` output), so it is a deliberat
 migration to be executed as a dedicated, carefully-verified unit. Then: copy_move,
 bit_operations, calls, function_blocks, unsupported_manual_port, ladder canonicalization, L5K
 project linking.
+
+## Typed Family Activation — Stage 8: translate() routed through the pipeline; legacy engine isolated as parity oracle
+
+**Files:** `server/translate.ts` (whole-program engine renamed `translateLegacyForParity`;
+new public `translate()` reshapes a `CompileResult` → `TranslationResult`);
+`migration/hybrid.ts` (`emitLegacyFragment` export; mapping/labels aux from the legacy
+allocator component; legacy-fragment diagnostics propagated); `registry/orchestrator.ts` (routes
+EVERY parseable ST program through hybrid — including pure-legacy; ST parse failures fail
+closed WITHOUT the oracle); `compat/legacy-bridge.ts` + `migration/parity.ts` (point at the
+renamed oracle); `tests/compiler/migration/oracle-isolation.test.ts`; `tests/corpus/roundtrip.ts`
+(manual-port detection robust to the new diagnostic format); corpus snapshot updated (honest —
+canonical output, verified sensible).
+
+**Result:** The public `translate()` no longer bypasses the registry. For Structured Text it
+goes: direction adapter → CompileRequest → registry → semantic pipeline → canonical IR →
+capability evaluator → loss collector → mixed router → artifact emission → legacy response
+adapter. The whole-program legacy engine is `translateLegacyForParity` — used ONLY by the
+parity harness and the L5K legacy fallback in the bridge; an enforced import-boundary test
+forbids any other production module from importing it, and the server API (`routers.ts`) uses
+the public `translate`. Runtime spies prove `compile()` and `translate()` never invoke the
+oracle for ST. Mapping/labels/stats/diagnostics are preserved for server/UI callers (device
+allocation now lives in the mapping artifact, not inline `AT`).
+
+**Whole-program oracle invoked by ordinary requests?** NO for Structured Text (canonical/mixed
+pipeline). L5K still uses the legacy project path (bridge → oracle) until Stage 15.
+
+**Gate:** check 0 · test **225 passed/1 skipped** · test:ir · test:semantic · test:migration ·
+verify:legacy-parity PASS (36, 0) · verify:corpus-migration PASS (7, 3 mixed) ·
+verify:semantic-loss PASS · verify:capabilities PASS · corpus 7/7 · roundtrip 6/6 · build OK.
+
+**Minimum boundary items 1-9 now COMPLETE.**

@@ -21,8 +21,10 @@ import {
   type GeneratedArtifact,
 } from "../contracts";
 import type { LanguageRegistry } from "./registry";
-import { compileHybrid } from "../migration/hybrid";
+import { compileHybrid, isHybridEligibleSource } from "../migration/hybrid";
 import { completenessFromLosses } from "../loss/records";
+import { parseSTSourceWithDiagnostics } from "../parser";
+import { lineSpan } from "../contracts/source";
 
 function fail(
   request: CompileRequest,
@@ -110,15 +112,23 @@ export function compileWithRegistry(request: CompileRequest, registry: LanguageR
   // ── Mixed-program (hybrid) routing ──────────────────────────────────────
   // Route each statement to the canonical backend if its family is
   // canonical-active, else to the legacy engine — even when they interleave in
-  // one program. Used whenever the program has at least one canonical node;
-  // pure-legacy programs fall through to the whole-program legacy bridge (which
-  // also produces mapping/labels artifacts).
+  // one program. Used for EVERY parseable ST program (including pure-legacy),
+  // so ordinary compilation NEVER invokes the whole-program legacy oracle. The
+  // memory-map/labels aux comes from the legacy allocator component (a
+  // hardware_mapping/project_metadata concern), not the oracle. Non-ST sources
+  // (L5K) are not hybrid-eligible and fall through to the legacy bridge.
   const hybrid = compileHybrid(source, resolvedSource, request.targetLanguage);
-  if (hybrid && hybrid.canonicalNodeCount > 0) {
+  if (hybrid) {
     const artifacts: GeneratedArtifact[] = [
       { kind: "structured_text", language: request.targetLanguage, name: "output.st", content: hybrid.output },
     ];
-    const engine = hybrid.legacyNodeCount > 0 ? "mixed" : "canonical";
+    if (hybrid.mappingYaml && hybrid.mappingYaml.trim() && hybrid.mappingYaml !== "allocations: {}\n") {
+      artifacts.push({ kind: "project_exchange", language: request.targetLanguage, name: "mapping.yaml", content: hybrid.mappingYaml });
+    }
+    if (hybrid.labelsCsv && hybrid.labelsCsv.split(/\r?\n/).length > 1) {
+      artifacts.push({ kind: "project_exchange", language: request.targetLanguage, name: "labels.csv", content: hybrid.labelsCsv });
+    }
+    const engine = hybrid.legacyNodeCount > 0 && hybrid.canonicalNodeCount > 0 ? "mixed" : hybrid.canonicalNodeCount > 0 ? "canonical" : "legacy";
     // Completeness is DERIVED from the authoritative loss records — a program
     // that carries any real semantic loss can never report executable_complete.
     const manualPortCount = hybrid.losses.filter((l) => l.disposition === "manual_port" || l.disposition === "unsupported").length;
@@ -155,7 +165,22 @@ export function compileWithRegistry(request: CompileRequest, registry: LanguageR
     };
   }
 
-  // ── Emit (transitional legacy bridge — pure-legacy programs) ─────────────
+  // ── ST parse failure: report it WITHOUT invoking the whole-program oracle ─
+  // A hybrid-eligible source that produced a null hybrid result failed to parse
+  // (or its raw/canonical alignment broke). Ordinary compilation must not fall
+  // back to the legacy oracle, so surface the parse diagnostics and fail closed.
+  if (isHybridEligibleSource(resolvedSource)) {
+    const parsed = parseSTSourceWithDiagnostics(source);
+    const diags: CompilerDiagnostic[] = parsed.diagnostics.map((d) => ({
+      code: d.code, severity: "error", message: d.message, stage: "parse",
+      language: resolvedSource, span: lineSpan("<input>", d.line), reviewRequired: true,
+    }));
+    return fail(request, resolvedSource, source, diags.length > 0 ? diags : [
+      { code: "PARSE_FAILED", severity: "error", message: "Source could not be parsed as Structured Text.", stage: "parse", language: resolvedSource, reviewRequired: true },
+    ]);
+  }
+
+  // ── Emit (transitional legacy bridge — non-ST sources, e.g. L5K) ──────────
   const emit = backend.emitFromSource(resolvedSource, source, { options: request.options });
   const outputArtifact = emit.artifacts.find((a) => a.name === "output.st");
   const outputEmpty = !outputArtifact || outputArtifact.content.trim() === "";

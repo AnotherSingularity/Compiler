@@ -2,39 +2,45 @@
 
 exports[`Corpus: AB → MEL > translates 01_ARRAY100_AVERAGE.st 1`] = `
 {
-  "diagnosticCodes": [],
+  "diagnosticCodes": [
+    "MIGRATION_HYBRID_ROUTING",
+  ],
   "errorCount": 0,
   "inputLines": 19,
   "manualPortCount": 0,
   "ok": true,
   "outputLineRange": "10-24",
-  "translatedNodes": 10,
+  "translatedNodes": 5,
   "warnCount": 0,
 }
 `;
 
 exports[`Corpus: AB → MEL > translates 02_ARRAY2000_AVERAGE.st 1`] = `
 {
-  "diagnosticCodes": [],
+  "diagnosticCodes": [
+    "MIGRATION_HYBRID_ROUTING",
+  ],
   "errorCount": 0,
   "inputLines": 19,
   "manualPortCount": 0,
   "ok": true,
   "outputLineRange": "10-24",
-  "translatedNodes": 10,
+  "translatedNodes": 5,
   "warnCount": 0,
 }
 `;
 
 exports[`Corpus: AB → MEL > translates 03_CHECK_SUM.st 1`] = `
 {
-  "diagnosticCodes": [],
+  "diagnosticCodes": [
+    "MIGRATION_HYBRID_ROUTING",
+  ],
   "errorCount": 0,
   "inputLines": 26,
   "manualPortCount": 0,
   "ok": true,
-  "outputLineRange": "25-49",
-  "translatedNodes": 11,
+  "outputLineRange": "10-24",
+  "translatedNodes": 8,
   "warnCount": 0,
 }
 `;
@@ -42,27 +48,30 @@ exports[`Corpus: AB → MEL > translates 03_CHECK_SUM.st 1`] = `
 exports[`Corpus: AB → MEL > translates 04_FEN20_DATA_MOVE.st 1`] = `
 {
   "diagnosticCodes": [
-    "AB_MEL_TIMER_001",
+    "LOSS_TIMERS",
+    "MIGRATION_HYBRID_ROUTING",
   ],
   "errorCount": 0,
   "inputLines": 136,
   "manualPortCount": 0,
   "ok": true,
   "outputLineRange": "100-199",
-  "translatedNodes": 83,
+  "translatedNodes": 22,
   "warnCount": 1,
 }
 `;
 
 exports[`Corpus: AB → MEL > translates 05_HMI_ALARM_MESSAGE.st 1`] = `
 {
-  "diagnosticCodes": [],
+  "diagnosticCodes": [
+    "MIGRATION_HYBRID_ROUTING",
+  ],
   "errorCount": 0,
   "inputLines": 46,
   "manualPortCount": 0,
   "ok": true,
-  "outputLineRange": "50-99",
-  "translatedNodes": 36,
+  "outputLineRange": "25-49",
+  "translatedNodes": 2,
   "warnCount": 0,
 }
 `;
@@ -71,29 +80,33 @@ exports[`Corpus: AB → MEL > translates tank_level_pid_loop.st 1`] = `
 {
   "diagnosticCodes": [
     "AB_MEL_PID_001",
-    "AB_MEL_PID_002",
+    "LOSS_CONVERSION_NARROWING",
+    "LOSS_PROCESS_CONTROL",
+    "MIGRATION_HYBRID_ROUTING",
   ],
   "errorCount": 0,
   "inputLines": 127,
-  "manualPortCount": 10,
+  "manualPortCount": 2,
   "ok": true,
-  "outputLineRange": "100-199",
-  "translatedNodes": 28,
-  "warnCount": 0,
+  "outputLineRange": "50-99",
+  "translatedNodes": 18,
+  "warnCount": 2,
 }
 `;
 
 exports[`Corpus: MEL → AB > translates mel/runtime_basics.st 1`] = `
 {
   "diagnosticCodes": [
+    "LOSS_CONVERSION_PRECISION",
     "MEL_AB_FB_001",
+    "MIGRATION_HYBRID_ROUTING",
   ],
   "errorCount": 0,
   "inputLines": 47,
   "manualPortCount": 2,
   "ok": true,
   "outputLineRange": "50-99",
-  "translatedNodes": 20,
-  "warnCount": 0,
+  "translatedNodes": 18,
+  "warnCount": 1,
 }
 `;

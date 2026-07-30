@@ -8,7 +8,7 @@
  * — it only asks a backend to emit from a source language, and the backend
  * routes here.
  */
-import { translate, type Diagnostic as LegacyDiagnostic } from "../../translate";
+import { translateLegacyForParity, type Diagnostic as LegacyDiagnostic, type TranslationResult } from "../../translate";
 import {
   type LanguageId,
   type CompilerDiagnostic,
@@ -80,7 +80,7 @@ function mapDiagnostics(
 }
 
 function buildArtifacts(
-  result: ReturnType<typeof translate>,
+  result: TranslationResult,
   target: LanguageId,
 ): GeneratedArtifact[] {
   const artifacts: GeneratedArtifact[] = [
@@ -119,7 +119,7 @@ export function bridgeEmit(
   if (!direction) {
     throw new Error(`legacy bridge has no route ${sourceLanguage} → ${targetLanguage}`);
   }
-  const legacy = translate(source, direction, options);
+  const legacy = translateLegacyForParity(source, direction, options);
   const errorCount = legacy.diagnostics.filter((d) => d.severity === "ERROR").length;
   return {
     ok: legacy.ok,

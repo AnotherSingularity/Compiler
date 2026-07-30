@@ -7,7 +7,7 @@
  * ParityApproval; an unapproved difference fails the harness.
  */
 import { createHash } from "crypto";
-import { translate } from "../../translate";
+import { translateLegacyForParity } from "../../translate";
 import type { LanguageId } from "../contracts/ids";
 import { tryCanonicalCompile } from "./routing";
 
@@ -65,7 +65,7 @@ export function runParity(fixtures: ParityFixture[], approvals: ParityApproval[]
   const rows: ParityRow[] = [];
   for (const f of fixtures) {
     const { src, tgt } = languages(f.direction);
-    const legacy = translate(f.source, f.direction).output;
+    const legacy = translateLegacyForParity(f.source, f.direction).output;
     const canonical = tryCanonicalCompile(f.source, src, tgt);
     const legacyHash = sha(legacy);
     const canonicalHash = canonical ? sha(canonical.artifacts.find((a) => a.name === "output.st")!.content) : "<not-canonical>";

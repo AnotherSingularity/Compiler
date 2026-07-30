@@ -15,6 +15,8 @@
  */
 import type { LanguageId } from "../contracts/ids";
 import type { CompilerDiagnostic } from "../contracts/diagnostics";
+import { fromLegacySeverity } from "../contracts/diagnostics";
+import { lineSpan } from "../contracts/source";
 import type { MigrationExecutionSummary, SemanticLossRecord } from "../contracts/compile";
 import { collectProgramLosses } from "../loss/records";
 import { parseSTSourceWithDiagnostics, type ASTNode } from "../parser";
@@ -45,12 +47,28 @@ export interface HybridResult {
   outputLines: number;
   /** Structured semantic-loss records for the whole program (authoritative). */
   losses: SemanticLossRecord[];
+  /** Memory-map (hardware_mapping family) + labels (project_metadata) — legacy-produced aux. */
+  mappingYaml: string;
+  labelsCsv: string;
 }
 
-/** Direction of the legacy emitter for a target language. */
-function legacyEmit(target: LanguageId, nodes: ASTNode[], sourceLines: string[]): { output: string; diagnostics: unknown[] } {
+interface LegacyEmitFull { output: string; diagnostics: unknown[]; mappingYaml: string; labelsCsv: string; translatedNodes: number }
+
+/** Direction of the legacy emitter for a target language (full result incl. mapping/labels). */
+function legacyEmitFull(target: LanguageId, nodes: ASTNode[], sourceLines: string[]): LegacyEmitFull {
   if (target === "mitsubishi-gx-st") return emitMEL(nodes, "<input>", sourceLines);
   return emitAB(nodes, "<input>", sourceLines);
+}
+
+/**
+ * Per-fragment legacy emission for an explicitly legacy-only run. Receives the
+ * exact AST subset and source lines; returns only the emitted text. This is the
+ * ONLY legacy path ordinary compilation uses (it never calls the whole-program
+ * oracle).
+ */
+export function emitLegacyFragment(target: LanguageId, nodes: ASTNode[], sourceLines: string[]): { output: string; diagnostics: unknown[] } {
+  const r = legacyEmitFull(target, nodes, sourceLines);
+  return { output: r.output, diagnostics: r.diagnostics };
 }
 
 export function isHybridEligibleSource(lang: LanguageId): boolean {
@@ -105,7 +123,7 @@ export function compileHybrid(
       canonicalSegmentCount++;
       for (const d of locals) bump(declFamilyOf(d.type) ?? "declarations", "canonical");
     } else {
-      outParts.push(legacyEmit(targetLanguage, rawVarBlocks, sourceLines).output);
+      outParts.push(emitLegacyFragment(targetLanguage, rawVarBlocks, sourceLines).output);
       legacyNodeCount += locals.length;
       legacySegmentCount++;
       for (const d of locals) bump(declFamilyOf(d.type) ?? "arrays_structures", "legacy");
@@ -135,8 +153,17 @@ export function compileHybrid(
       for (let k = i; k < j; k++) { canonicalNodeCount++; bump(engineOf(k).family, "canonical"); }
     } else {
       const nodes = rawBody.slice(i, j);
-      const emitted = legacyEmit(targetLanguage, nodes, sourceLines);
+      const emitted = emitLegacyFragment(targetLanguage, nodes, sourceLines);
       outParts.push(emitted.output);
+      // Propagate the legacy fragment's own diagnostics (e.g. MANUAL PORT for an
+      // untranslatable instruction) — never silently drop them.
+      for (const d of emitted.diagnostics as Array<{ severity: string; code: string; message: string; line: number }>) {
+        diagnostics.push({
+          code: d.code, severity: fromLegacySeverity(d.severity), message: d.message,
+          stage: "emit", language: targetLanguage,
+          ...(d.line > 0 ? { span: lineSpan("<input>", d.line) } : {}),
+        });
+      }
       legacySegmentCount++;
       for (let k = i; k < j; k++) { legacyNodeCount++; bump(engineOf(k).family, "legacy"); }
     }
@@ -168,6 +195,12 @@ export function compileHybrid(
 
   const losses = collectProgramLosses(program, { sourceLanguage, targetLanguage });
 
+  // Memory-map + labels are legacy-family (hardware_mapping / project_metadata)
+  // artifacts. Produce them from the legacy allocator COMPONENT on the full AST
+  // (not the whole-program oracle) so the canonical/mixed result carries the same
+  // auxiliary artifacts the public API expects.
+  const aux = legacyEmitFull(targetLanguage, rawAst, sourceLines);
+
   return {
     output,
     diagnostics,
@@ -179,5 +212,7 @@ export function compileHybrid(
     familyExecution,
     outputLines: output === "" ? 0 : output.split("\n").length,
     losses,
+    mappingYaml: aux.mappingYaml,
+    labelsCsv: aux.labelsCsv,
   };
 }

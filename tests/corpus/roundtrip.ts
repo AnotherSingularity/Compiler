@@ -97,10 +97,14 @@ for (const fixture of fixtures) {
   // bodies, MANUAL placeholder suffixes that didn't exist in the original.
   // Filter known-acceptable lost tokens.
   const manualPortInstances = new Set<string>();
+  // A manual port occurred if ANY forward diagnostic is MANUAL_PORT. (The
+  // canonical pipeline reports these as structured loss-derived diagnostics
+  // and propagated legacy-fragment diagnostics; the whole-program oracle used a
+  // prose "instance member: X" form. Detect the condition robustly, then still
+  // try to pull instance names out of the prose form where present.)
+  const hasManualPort = fwd.diagnostics.some((d) => d.severity === "MANUAL_PORT");
   for (const d of fwd.diagnostics) {
     if (d.severity === "MANUAL_PORT") {
-      // Pull the instance name out of messages like "Reference to
-      // manual-ported instance member: LevelControl.SP — ..."
       const m = d.message.match(/instance(?: member)?:\s*([A-Za-z_][A-Za-z0-9_]*)/);
       if (m) manualPortInstances.add(m[1]);
     }
@@ -119,7 +123,7 @@ for (const fixture of fixtures) {
     if (manualPortInstances.has(t)) return false;
     // PID/PIDE/MSG-specific member names that only existed in the comment
     // body of a MANUAL_PORT block
-    if (manualPortInstances.size > 0 && ["SP", "PV", "OUT", "Kp", "Ki", "Kd", "SWM", "SO", "DB", "ERR", "BIAS", "MAXO", "MINO", "PID", "PIDE", "MSG"].includes(t)) return false;
+    if (hasManualPort && ["SP", "PV", "OUT", "Kp", "Ki", "Kd", "SWM", "SO", "DB", "ERR", "BIAS", "MAXO", "MINO", "PID", "PIDE", "MSG"].includes(t)) return false;
     return true;
   });
 

@@ -13,6 +13,8 @@ import { emitLadderRoutine } from "./compiler/ladder_emitter";
 import { emitLabelsCsv, emitUdtSummary } from "./compiler/labels_emitter";
 import { emitIoMapYaml } from "./compiler/module_emitter";
 import { emitAoiAsFb, groupRoutinesByAoi } from "./compiler/aoi_emitter";
+import { compileLegacy } from "./compiler/compat/legacy-adapter";
+import type { CompileResult } from "./compiler/contracts/compile";
 export interface Diagnostic {
   severity: "INFO" | "WARN" | "MANUAL_PORT" | "ERROR";
   code: string;
@@ -89,7 +91,16 @@ ${report.sourceContext}
 ${report.pipelineState}
 === END REPORT ===`;
 }
-export function translate(
+/**
+ * Whole-program legacy translation engine — the PARITY ORACLE.
+ *
+ * This is the original proof-of-concept pipeline. It is retained ONLY as a
+ * version-controlled oracle for the legacy-parity harness and for the L5K path
+ * (until L5K is canonicalized). It must NOT be imported by production API/UI
+ * modules — ordinary compilation goes through `translate()` → the registry /
+ * semantic pipeline / mixed router (see the enforced import-boundary test).
+ */
+export function translateLegacyForParity(
   source: string,
   direction: "ab2mel" | "mel2ab",
   options?: { memoryMap?: string; labelsCsv?: string }
@@ -267,6 +278,89 @@ export function translate(
 }
 // Export the formatter for use in the UI
 export { formatFailureReport };
+
+/**
+ * PUBLIC translation entry point.
+ *
+ * Routes through the registry / semantic pipeline / capability evaluator / loss
+ * collector / mixed migration router (via `compileLegacy`) and adapts the
+ * canonical `CompileResult` back to the legacy `TranslationResult` the server
+ * and UI consume. It NEVER invokes the whole-program legacy oracle
+ * (`translateLegacyForParity`) for Structured Text. The L5K project path stays
+ * on its dedicated legacy emitter until it is canonicalized (Stage 15).
+ */
+export function translate(
+  source: string,
+  direction: "ab2mel" | "mel2ab",
+  options?: { memoryMap?: string; labelsCsv?: string }
+): TranslationResult {
+  if (direction === "ab2mel" && looksLikeL5K(source)) {
+    return translateL5K(source, new Date().toISOString(), direction, options);
+  }
+  return compileResultToLegacy(compileLegacy(source, direction, options), source, direction);
+}
+
+function mapLegacySeverity(s: string): Diagnostic["severity"] {
+  if (s === "error") return "ERROR";
+  if (s === "warning") return "WARN";
+  if (s === "manual_port") return "MANUAL_PORT";
+  return "INFO";
+}
+
+/** Adapt a canonical CompileResult to the legacy TranslationResult shape. */
+function compileResultToLegacy(res: CompileResult, source: string, direction: "ab2mel" | "mel2ab"): TranslationResult {
+  const outputArtifact = res.artifacts.find((a) => a.name === "output.st");
+  const mapping = res.artifacts.find((a) => a.name === "mapping.yaml");
+  const labels = res.artifacts.find((a) => a.name === "labels.csv");
+  const output = outputArtifact?.content ?? "";
+
+  const diagnostics: Diagnostic[] = res.diagnostics.map((d) => ({
+    severity: mapLegacySeverity(d.severity),
+    code: d.code,
+    message: d.message,
+    line: d.span?.start.line ?? 0,
+  }));
+  // Legacy diagnostics are synthesized from the authoritative loss records (the
+  // legacy UI keys off MANUAL_PORT / WARN severities): manual-port/unsupported
+  // losses → MANUAL_PORT, lossy/synthesized losses → WARN.
+  for (const l of res.semanticLosses) {
+    const sev: Diagnostic["severity"] = l.disposition === "manual_port" || l.disposition === "unsupported" ? "MANUAL_PORT" : "WARN";
+    diagnostics.push({ severity: sev, code: `LOSS_${l.category.toUpperCase()}`, message: l.description, line: l.span?.start.line ?? 0 });
+  }
+
+  const firstError = res.diagnostics.find((d) => d.severity === "error");
+  const failureReport: FailureReport | null = res.ok
+    ? null
+    : {
+        stage: firstError?.stage ?? "compile",
+        error: firstError?.message ?? "compilation failed",
+        traceback: firstError ? `${firstError.code} at ${firstError.stage}` : "no exception",
+        sourceContext: buildSourceContext(source, firstError?.span?.start.line ?? 1),
+        pipelineState: "routed through registry/semantic pipeline",
+        timestamp: new Date().toISOString(),
+        direction,
+        inputLines: res.stats.inputLines,
+      };
+
+  return {
+    ok: res.ok,
+    output,
+    diagnostics,
+    mappingYaml: mapping?.content ?? "allocations: {}\n",
+    labelsCsv: labels?.content ?? "Class,Label,DataType,Device,Comment",
+    fbDefinitions: "",
+    udtDefinitions: "",
+    failureReport,
+    stats: {
+      inputLines: res.stats.inputLines,
+      outputLines: output === "" ? 0 : output.split("\n").length,
+      warningCount: res.stats.warningCount,
+      manualPortCount: res.stats.manualPortCount,
+      translatedNodes: res.stats.translatedNodes,
+    },
+  };
+}
+
 export const translateInputSchema = z.object({
   direction: z.enum(["ab2mel", "mel2ab"]),
   source: z.string().min(1, "Source code is required"),

@@ -60,32 +60,35 @@ describe("Translation Engine", () => {
       expect(result.output).toContain(".ET");
     });
 
-    it("allocates device addresses for VAR declarations", () => {
+    it("allocates device addresses for VAR declarations (in the mapping artifact)", () => {
       const source = "VAR\n  MyBool : BOOL;\n  MyInt : DINT;\nEND_VAR";
       const result = translate(source, "ab2mel");
       expect(result.ok).toBe(true);
-      expect(result.output).toContain("AT M");
-      expect(result.output).toContain("AT D");
+      // Canonical ST output carries the clean declarations; device allocation
+      // lives in the mapping artifact (hardware_mapping family), not inline AT.
+      expect(result.output).toContain("MyBool : BOOL;");
+      expect(result.output).toContain("MyInt : DINT;");
+      expect(result.mappingYaml).toContain("device: M"); // BOOL → M bit device
+      expect(result.mappingYaml).toContain("device: D"); // DINT → D word device
     });
 
     it("emits MANUAL_PORT for PIDE", () => {
       const source = "PIDE(Loop1);";
       const result = translate(source, "ab2mel");
-      expect(result.diagnostics.length).toBeGreaterThan(0);
-      expect(result.diagnostics[0].severity).toBe("MANUAL_PORT");
+      expect(result.diagnostics.some(d => d.severity === "MANUAL_PORT")).toBe(true);
       expect(result.output).toContain("MANUAL PORT");
     });
 
     it("emits MANUAL_PORT for MSG", () => {
       const source = "MSG(CommMsg);";
       const result = translate(source, "ab2mel");
-      expect(result.diagnostics[0].severity).toBe("MANUAL_PORT");
+      expect(result.diagnostics.some(d => d.severity === "MANUAL_PORT")).toBe(true);
     });
 
     it("emits MANUAL_PORT for motion instructions", () => {
       const source = "MAM(Axis1);";
       const result = translate(source, "ab2mel");
-      expect(result.diagnostics[0].severity).toBe("MANUAL_PORT");
+      expect(result.diagnostics.some(d => d.severity === "MANUAL_PORT")).toBe(true);
     });
 
     it("warns on retentive timer RTO", () => {
