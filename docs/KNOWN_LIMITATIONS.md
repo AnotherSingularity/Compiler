@@ -297,6 +297,3 @@ These are deliberate choices, not gaps:
 
 These boundaries keep the tool's scope honest. Crossing any of them
 turns it into a different product.
-
-## Parser
-- Multi-branch `CASE` mis-parses: the branch statement-list does not stop at the next label, producing a `PARSE_UNEXPECTED_TOKEN`. Single-branch CASE works. (Surfaced by the Stage 2b parser-recovery correction; fix deferred.)

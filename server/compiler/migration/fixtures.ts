@@ -10,10 +10,8 @@ const SNIPPETS: Array<{ id: string; family: string; source: string }> = [
   { id: "expr_cmp", family: "expressions", source: "ok := (x >= 10) AND (x <= 20);" },
   { id: "assign_member", family: "assignments", source: "obj.field := arr[3];" },
   { id: "cf_if", family: "control_flow", source: "IF x > 0 THEN\n  y := 1;\nELSIF x < 0 THEN\n  y := 0 - 1;\nELSE\n  y := 0;\nEND_IF;" },
-  // Single-branch CASE: the baseline ST parser does not correctly delimit
-  // multi-branch CASE bodies (a pre-existing limitation — see KNOWN_LIMITATIONS
-  // / BUILDOUT_STATUS). Parity stays within what the parser handles today.
-  { id: "cf_case", family: "control_flow", source: "CASE sel OF\n  1:\n    a := 1;\nELSE\n  a := 0;\nEND_CASE;" },
+  // Real multi-branch CASE with comma labels and a range (parser fix, Stage 3).
+  { id: "cf_case", family: "control_flow", source: "CASE sel OF\n  0:\n    a := 1;\n  2, 3:\n    a := 2;\n  4..8:\n    a := 3;\nELSE\n  a := 0;\nEND_CASE;" },
   { id: "cf_for", family: "control_flow", source: "FOR i := 0 TO 10 DO\n  sum := sum + i;\nEND_FOR;" },
   { id: "cf_while", family: "control_flow", source: "WHILE go DO\n  n := n - 1;\nEND_WHILE;" },
   { id: "decl_prim", family: "declarations", source: "VAR\n  cnt : DINT;\n  ok : BOOL := 1;\nEND_VAR\ncnt := cnt + 1;" },

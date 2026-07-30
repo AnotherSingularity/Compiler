@@ -80,6 +80,8 @@ export function emitExpression(expr: Expression, _t: StEmitTarget): string {
       const to = expr.to.kind;
       return `${to.toUpperCase()}(${emitExpression(expr.operand, _t)})`;
     }
+    case "range":
+      return `${emitExpression(expr.low, _t)}..${emitExpression(expr.high, _t)}`;
     default:
       throw new UnsupportedByCanonicalEmitter(expr.node);
   }

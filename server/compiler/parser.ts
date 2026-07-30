@@ -202,7 +202,7 @@ export type ASTNode =
   | BinaryOpNode | UnaryOpNode | CompareNode | LogicalNode
   | IdentNode | LiteralNode | MemberAccessNode | BitAccessNode
   | IndexNode | FunctionCallNode | TypeCastNode
-  | CommentNode | BlockNode | ErrorNode;
+  | CommentNode | BlockNode | ErrorNode | RangeNode;
 export interface ProgramNode { kind: "program"; name: string; varBlocks: VarBlockNode[]; body: ASTNode[]; line: number; }
 export interface VarBlockNode { kind: "var_block"; scope: string; decls: VarDeclNode[]; line: number; }
 export interface VarDeclNode { kind: "var_decl"; name: string; type: string; initial: ASTNode | null; line: number; }
@@ -235,6 +235,8 @@ export interface BlockNode { kind: "block"; statements: ASTNode[]; line: number;
  * value. Carries the offending text and source position for diagnostics.
  */
 export interface ErrorNode { kind: "error"; text: string; reason: string; line: number; col: number; }
+/** CASE label range: LO..HI. */
+export interface RangeNode { kind: "range"; low: ASTNode; high: ASTNode; line: number; }
 /** Structured parser diagnostic (PARSE_*). */
 export interface ParseDiagnostic { code: string; message: string; line: number; col: number; }
 // === Parser ===
@@ -386,6 +388,50 @@ export class Parser {
     this.consume("SEMI");
     return { kind: "if", condition, thenBlock, elsifBranches, elseBlock, line };
   }
+  /**
+   * Look ahead (without consuming) to decide whether the upcoming tokens form a
+   * CASE branch label list ("N:", "N, M:", "LO..HI:", enum idents), so a branch
+   * body terminates at the next label. Structural — not broad token guessing:
+   * an assignment ("a := 1") is rejected because "a" is followed by ASSIGN, not
+   * COMMA/COLON/DOTDOT.
+   */
+  private looksLikeCaseLabel(): boolean {
+    let i = this.pos;
+    const ty = (): TokenType => (this.tokens[i]?.type ?? "EOF");
+    const atom = (): boolean => {
+      if (ty() === "MINUS") i++;
+      if (ty() === "NUMBER" || ty() === "IDENT") {
+        i++;
+        if (ty() === "DOTDOT") { // range LO..HI
+          i++;
+          if (ty() === "MINUS") i++;
+          if (ty() === "NUMBER" || ty() === "IDENT") { i++; return true; }
+          return false;
+        }
+        return true;
+      }
+      return false;
+    };
+    if (!atom()) return false;
+    // Only a label if the atom list is terminated by a COLON.
+    // Loop over comma-separated atoms.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (ty() === "COLON") return true;
+      if (ty() === "COMMA") { i++; if (!atom()) return false; continue; }
+      return false;
+    }
+  }
+  /** A CASE label is a single value or a `LO..HI` range. */
+  private parseCaseLabel(): ASTNode {
+    const low = this.parseExpression();
+    if (this.match("DOTDOT")) {
+      const t = this.advance();
+      const high = this.parseExpression();
+      return { kind: "range", low, high, line: t.line };
+    }
+    return low;
+  }
   private parseCase(): CaseNode {
     const line = this.expect("CASE").line;
     const selector = this.parseExpression();
@@ -393,10 +439,15 @@ export class Parser {
     const branches: Array<{ labels: ASTNode[]; block: ASTNode[] }> = [];
     while (!this.match("ELSE", "END_CASE", "EOF")) {
       const labels: ASTNode[] = [];
-      labels.push(this.parseExpression());
-      while (this.consume("COMMA")) labels.push(this.parseExpression());
+      labels.push(this.parseCaseLabel());
+      while (this.consume("COMMA")) labels.push(this.parseCaseLabel());
       this.expect("COLON");
-      const block = this.parseStatementList("ELSE", "END_CASE");
+      // Branch body: parse statements until ELSE/END_CASE/EOF OR the next label.
+      const block: ASTNode[] = [];
+      while (!this.match("ELSE", "END_CASE", "EOF") && !this.looksLikeCaseLabel()) {
+        const s = this.parseStatement();
+        if (s) block.push(s);
+      }
       branches.push({ labels, block });
     }
     let elseBlock: ASTNode[] | null = null;

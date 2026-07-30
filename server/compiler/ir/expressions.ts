@@ -135,6 +135,14 @@ export interface UnresolvedExpr extends IrNodeBase {
   type: CanonicalType;
 }
 
+/** CASE label range LO..HI (appears only in case-branch labels). */
+export interface RangeExpr extends IrNodeBase {
+  node: "range";
+  low: Expression;
+  high: Expression;
+  type: CanonicalType;
+}
+
 export type Expression =
   | LiteralExpr
   | SymbolRefExpr
@@ -150,10 +158,11 @@ export type Expression =
   | InstanceFieldExpr
   | HardwareRefExpr
   | VendorExtensionExpr
-  | UnresolvedExpr;
+  | UnresolvedExpr
+  | RangeExpr;
 
 export const EXPRESSION_NODE_KINDS = new Set<string>([
   "literal", "symbol_ref", "member_access", "array_access", "unary", "binary",
   "comparison", "logical", "conversion", "function_call", "fb_invoke",
-  "instance_field", "hardware_ref", "vendor_extension", "unresolved_expr",
+  "instance_field", "hardware_ref", "vendor_extension", "unresolved_expr", "range",
 ]);

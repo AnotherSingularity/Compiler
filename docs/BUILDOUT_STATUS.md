@@ -451,3 +451,36 @@ copy_move, bit_operations, calls, function_blocks, ladder, project_metadata, har
 unsupported_manual_port. The legacy `translate()` API is still the legacy engine (its flip is
 gated on all supported families being active — order §16). Next: semantic symbol/type
 resolution (order §9), then timers/counters/copy_move/calls, then the `translate()` flip.
+
+---
+
+## Stage 3 (CASE) — Multi-branch CASE parsing corrected
+
+**Status:** COMPLETE · **Commit:** `<stage3case>` (this commit)
+
+**Reverified start:** local==remote==`5249df0`, clean; baseline gate green.
+
+**Files:** `server/compiler/parser.ts` (label-boundary lookahead + range labels),
+`server/compiler/ir/expressions.ts` (RangeExpr), `server/compiler/ir/normalize.ts`,
+`server/compiler/lowering/st-emitter.ts`, `server/compiler/migration/families.ts`,
+`server/compiler/migration/{fixtures,approvals}.ts`,
+`tests/compiler/semantic/case-parser.test.ts` (new), ledger.
+
+**Architectural result:** the ST parser now correctly delimits multi-branch `CASE`. Added
+`looksLikeCaseLabel()` — a structural (non-guessing) lookahead that ends a branch body at the
+next `N:`/`N, M:`/`LO..HI:` label (an assignment `a := 1` is not mistaken for a label because
+`a` is followed by `:=`, not `,`/`:`/`..`). Added range labels (`LO..HI`) end-to-end: parser
+`RangeNode` → IR `RangeExpr` → canonical ST emitter (`lo..hi`) → coverage. The `cf_case`
+parity fixture is now a **real multi-branch CASE** (comma labels + a range + ELSE), not the
+single-branch workaround.
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test` **152 passed, 1 skipped** (9 new CASE tests:
+two-branch, comma labels, range, ELSE, multi-statement bodies, nested CASE, nested IF,
+cross-language emission, no-fabricated-literals) · corpus 7/7 · roundtrip 6/6 ·
+`verify:legacy-parity` PASS (20, 0 unapproved) · build OK. Removed the multi-branch CASE
+entry from KNOWN_LIMITATIONS.
+
+**Honest status:** `control_flow` canonical emission now covers multi-branch CASE. The larger
+items of this order — **mixed-program routing** (canonical families staying canonical when
+interleaved with legacy families; nonzero corpus canonical nodes), full symbol/type
+resolution, and the typed families — remain to be built; see below.

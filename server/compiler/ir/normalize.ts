@@ -137,6 +137,13 @@ function normalizeExpr(node: Ast, ctx: Ctx, path: string): Expression {
         type: unresolvedType(),
       };
     }
+    case "range":
+      return {
+        node: "range", id, origin: origin(ctx, node, "range"),
+        low: normalizeExpr(node.low, ctx, `${path}/lo`),
+        high: normalizeExpr(node.high, ctx, `${path}/hi`),
+        type: unresolvedType(),
+      };
     default:
       return { node: "unresolved_expr", id, origin: origin(ctx, node ?? {}, String(node?.kind ?? "unknown")), raw: JSON.stringify(node ?? null), reason: `unhandled expression kind ${node?.kind}`, type: unresolvedType() };
   }

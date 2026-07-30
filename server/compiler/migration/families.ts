@@ -124,7 +124,7 @@ export function familyOfStatement(stmt: Statement): MigrationFamily {
 /** Expression kinds the canonical ST emitter fully supports (the `expressions` family). */
 const CANONICAL_EXPRESSION_KINDS = new Set<string>([
   "literal", "symbol_ref", "member_access", "array_access", "unary", "binary",
-  "comparison", "logical", "conversion",
+  "comparison", "logical", "conversion", "range",
 ]);
 
 /** True if every expression under `expr` is emittable by the canonical expr family. */
@@ -139,6 +139,7 @@ export function expressionFullyCanonical(expr: Expression): boolean {
     case "logical":
       return expressionFullyCanonical(expr.left) && expressionFullyCanonical(expr.right);
     case "conversion": return expressionFullyCanonical(expr.operand);
+    case "range": return expressionFullyCanonical(expr.low) && expressionFullyCanonical(expr.high);
     default: return true;
   }
 }
