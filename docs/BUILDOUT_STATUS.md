@@ -600,3 +600,23 @@ equivalent-lowerings, 0 losses). 2 fixtures carry structured loss records.
 **Gate:** check 0 · test **186 passed, 1 skipped** · verify:legacy-parity PASS (20,0) ·
 verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS (7, 2 with losses) ·
 corpus 7/7 · roundtrip 6/6 · build OK.
+
+## Typed Semantic Core — Stage 3: fix vendor timer/counter field-access routing (correctness)
+
+**Files:** `server/compiler/migration/families.ts`; `tests/compiler/migration/hybrid.test.ts`.
+
+**Bug:** Mixed routing sent an assignment reading a timer/counter status/config field
+(`RunTimer.DN`, `Ctr.ACC`, …) through the canonical path, which emits the member name
+VERBATIM. The legacy emitters rewrite these across dialects (AB `.DN/.PRE/.ACC` ↔ IEC
+`.Q/.PT/.ET/.PV/.CV`). Result: canonical output emitted `RunTimer.DN` where the Mitsubishi
+target requires `RunTimer.Q` — semantically wrong output, uncaught by parity/corpus.
+
+**Fix:** `expressionFullyCanonical` now treats a member access on a vendor-rewritten instance
+field (DN/PRE/ACC/Q/PT/ET/PV/CV) as NOT canonically safe, so the statement routes to the
+legacy engine which applies the correct target rewrite. Honest and conservative: it never
+emits a wrong field name; plain struct members stay canonical. (Proper `instance_field`
+modeling arrives with the timers/counters family activation.) Regression test added.
+
+**Gate:** check 0 · test **187 passed, 1 skipped** · verify:legacy-parity PASS (20,0) ·
+verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · corpus 7/7 ·
+roundtrip 6/6 · build OK.

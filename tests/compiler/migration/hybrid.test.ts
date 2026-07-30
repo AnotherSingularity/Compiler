@@ -63,6 +63,26 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
     expect(compileHybrid("x := @ ;", AB, MEL)).toBeNull();
   });
 
+  it("routes a vendor timer/counter field read to legacy so it is rewritten (never emitted verbatim)", () => {
+    // AB `.DN/.ACC/.PRE` must become MEL `.Q/.ET/.PT`; a canonical member-access
+    // would emit the AB name verbatim — semantically wrong for the MEL target.
+    const dn = compileHybrid("out := RunTimer.DN;", AB, MEL)!;
+    expect(dn.canonicalNodeCount).toBe(0);
+    expect(dn.legacyNodeCount).toBe(1);
+    expect(dn.output).toContain("RunTimer.Q");
+    // The emitted CODE (non-comment lines) must not carry the un-rewritten field.
+    const codeLines = dn.output.split("\n").filter((l) => !l.trim().startsWith("//"));
+    expect(codeLines.join("\n")).not.toMatch(/RunTimer\.DN/);
+
+    const acc = compileHybrid("cnt := Ctr.ACC;", AB, MEL)!;
+    expect(acc.output).toContain("Ctr.ET");
+
+    // A plain (non-vendor) struct member stays canonical and verbatim.
+    const plain = compileHybrid("y := a.foo + 1;", AB, MEL)!;
+    expect(plain.canonicalNodeCount).toBe(1);
+    expect(plain.output).toContain("a.foo");
+  });
+
   describe("corpus migration (verify:corpus-migration)", () => {
     const dir = join(__dirname, "../../corpus/fixtures");
     const fixtures = readdirSync(dir).filter((f) => f.endsWith(".st"));

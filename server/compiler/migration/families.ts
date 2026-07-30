@@ -165,11 +165,27 @@ const CANONICAL_EXPRESSION_KINDS = new Set<string>([
   "comparison", "logical", "conversion", "range",
 ]);
 
+/**
+ * Vendor timer/counter status/config fields that the legacy emitters rewrite
+ * across dialects (AB `.DN/.PRE/.ACC` ↔ IEC `.Q/.PT/.ET/.PV/.CV`). A canonical
+ * member-access emits the field name verbatim, which would DIVERGE from the
+ * target-correct rewrite. Until timers/counters are canonically modeled as
+ * `instance_field` accesses, a member access on one of these names is NOT
+ * canonically safe and must route to the legacy engine (which rewrites it
+ * correctly). This prevents the canonical path from emitting semantically wrong
+ * output (e.g. `T.DN` where the Mitsubishi target requires `T.Q`).
+ */
+const VENDOR_REWRITTEN_INSTANCE_FIELDS = new Set<string>([
+  "DN", "PRE", "ACC", "Q", "PT", "ET", "PV", "CV",
+]);
+
 /** True if every expression under `expr` is emittable by the canonical expr family. */
 export function expressionFullyCanonical(expr: Expression): boolean {
   if (!CANONICAL_EXPRESSION_KINDS.has(expr.node)) return false;
   switch (expr.node) {
-    case "member_access": return expressionFullyCanonical(expr.object);
+    case "member_access":
+      if (VENDOR_REWRITTEN_INSTANCE_FIELDS.has(expr.member.toUpperCase())) return false;
+      return expressionFullyCanonical(expr.object);
     case "array_access": return expressionFullyCanonical(expr.array) && expr.indices.every(expressionFullyCanonical);
     case "unary": return expressionFullyCanonical(expr.operand);
     case "binary":
