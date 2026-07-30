@@ -58,13 +58,12 @@ describe("Conversion recognition + lowering", () => {
     }
   });
 
-  it("stays canonical beside a legacy timer (mixed) and records a conversion loss", () => {
-    const h = compileHybrid("r := DINT_TO_REAL(n) + 1.0;\nTON(T1);", AB, MEL)!;
+  it("stays canonical beside a legacy PID (mixed) and records a conversion loss", () => {
+    const h = compileHybrid("r := DINT_TO_REAL(n) + 1.0;\nPID(Loop1);", AB, MEL)!;
     expect(h.canonicalNodeCount).toBe(1); // the conversion assignment
-    expect(h.legacyNodeCount).toBe(1); // the timer
+    expect(h.legacyNodeCount).toBe(1); // the PID (still legacy)
     const cats = h.losses.map((l) => l.category);
     expect(cats).toContain("conversion_precision"); // DINT→REAL
-    expect(cats).toContain("timers");
   });
 
   it("is pure (input program not mutated by lowerConversions)", () => {

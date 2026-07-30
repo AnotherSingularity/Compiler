@@ -48,8 +48,8 @@ export const DEFAULT_FAMILY_STATUS: Record<MigrationFamily, MigrationStatus> = {
   declarations: "canonical_active",
   arrays_structures: "canonical_active",
   conversions: "canonical_active",
-  timers: "legacy_only",
-  counters: "legacy_only",
+  timers: "canonical_active",
+  counters: "canonical_active",
   copy_move: "legacy_only",
   bit_operations: "legacy_only",
   calls: "legacy_only",
@@ -162,7 +162,7 @@ function childStatementsOf(stmt: Statement): Statement[] {
 /** Expression kinds the canonical ST emitter fully supports (the `expressions` family). */
 const CANONICAL_EXPRESSION_KINDS = new Set<string>([
   "literal", "symbol_ref", "member_access", "array_access", "unary", "binary",
-  "comparison", "logical", "conversion", "range",
+  "comparison", "logical", "conversion", "range", "instance_field",
 ]);
 
 /**
@@ -204,6 +204,9 @@ export function expressionFullyCanonical(
     case "conversion":
       return isActive("conversions") && expressionFullyCanonical(expr.operand, isActive);
     case "range": return expressionFullyCanonical(expr.low, isActive) && expressionFullyCanonical(expr.high, isActive);
+    case "instance_field":
+      // A timer/counter field is canonical only when its instance family is active.
+      return isActive(expr.instanceKind === "counter" ? "counters" : "timers");
     default: return true;
   }
 }

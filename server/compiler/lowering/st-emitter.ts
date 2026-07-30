@@ -16,7 +16,9 @@ import type {
   LogicalOperator,
 } from "../ir/expressions";
 import type { Statement } from "../ir/statements";
+import type { SemanticOperationNode } from "../ir/operations";
 import type { CanonicalRoutine } from "../ir/declarations";
+import { targetFieldSpelling, type CanonicalField, type InstanceKind } from "../semantic/instance-members";
 
 export class UnsupportedByCanonicalEmitter extends Error {
   constructor(public readonly nodeKind: string) {
@@ -88,8 +90,41 @@ export function emitExpression(expr: Expression, _t: StEmitTarget): string {
     }
     case "range":
       return `${emitExpression(expr.low, _t)}..${emitExpression(expr.high, _t)}`;
+    case "instance_field": {
+      const spelling = targetFieldSpelling(expr.field as CanonicalField, expr.instanceKind as InstanceKind, _t.language) ?? expr.field;
+      return `${expr.instance}.${spelling}`;
+    }
     default:
       throw new UnsupportedByCanonicalEmitter(expr.node);
+  }
+}
+
+/**
+ * Emit a timer/counter semantic operation as a target FB invocation. The enable
+ * (IN/CU/CD) and preset (PT/PV) are NOT present in the ST source (they come from
+ * ladder rung context), so they are emitted as explicit TODO placeholders —
+ * NEVER as an apparently-valid zero preset (`T#0ms`) — with the authoritative
+ * loss record carrying the review requirement. Reset operations emit the target
+ * reset mechanism for the resolved instance kind.
+ */
+function emitOperation(op: SemanticOperationNode, indent: string): string[] {
+  const instArg = op.args.find((a) => a.role === "timer" || a.role === "counter" || a.role === "arg0");
+  const inst = instArg && instArg.value.node === "symbol_ref" ? instArg.value.name : "UNKNOWN_INSTANCE";
+  switch (op.operation) {
+    case "timer_on_delay":
+    case "timer_off_delay":
+    case "timer_retentive":
+      return [`${indent}${inst}(IN := TODO_${inst}_enable, PT := TODO_${inst}_preset);`];
+    case "counter_up":
+      return [`${indent}${inst}(CU := TODO_${inst}_count_up, R := TODO_${inst}_reset, PV := TODO_${inst}_preset);`];
+    case "counter_down":
+      return [`${indent}${inst}(CD := TODO_${inst}_count_down, LD := TODO_${inst}_load, PV := TODO_${inst}_preset);`];
+    case "timer_reset":
+      return [`${indent}${inst}(IN := FALSE); (* timer reset *)`];
+    case "counter_reset":
+      return [`${indent}${inst}(R := TRUE); (* counter reset *)`];
+    default:
+      throw new UnsupportedByCanonicalEmitter(`semantic_operation:${op.operation}`);
   }
 }
 
@@ -178,6 +213,7 @@ function emitStatement(stmt: Statement, t: StEmitTarget, indent: string): string
     case "exit": return [`${indent}EXIT;`];
     case "continue": return [`${indent}CONTINUE;`];
     case "noop": return [`${indent}(* ${stmt.reason} *)`];
+    case "semantic_operation": return emitOperation(stmt, indent);
     default:
       throw new UnsupportedByCanonicalEmitter(stmt.node);
   }

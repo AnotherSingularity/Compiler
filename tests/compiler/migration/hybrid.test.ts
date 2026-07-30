@@ -8,16 +8,16 @@ const AB = "rockwell-logix-st" as const;
 const MEL = "mitsubishi-gx-st" as const;
 
 describe("Stage 2 — mixed-program (hybrid) routing", () => {
-  it("routes assignment + IF canonically while a timer stays legacy, preserving order", () => {
-    const src = "y := a + 1;\nIF x > 0 THEN\n  z := 2;\nEND_IF;\nTON(RunTimer);\nw := b;";
+  it("routes assignment + IF canonically while a PID (legacy-only) stays legacy, preserving order", () => {
+    const src = "y := a + 1;\nIF x > 0 THEN\n  z := 2;\nEND_IF;\nPID(Loop1);\nw := b;";
     const h = compileHybrid(src, AB, MEL)!;
     expect(h.canonicalNodeCount).toBe(3); // y:=, IF, w:=
-    expect(h.legacyNodeCount).toBe(1); // TON
+    expect(h.legacyNodeCount).toBe(1); // PID (manual-port, still legacy)
     const lines = h.output.split("\n");
-    // order preserved: y:= first, w:= last, TON fragment between IF and w:=
+    // order preserved: y:= first, w:= last, PID fragment between IF and w:=
     expect(lines[0]).toBe("y := a + 1;");
-    expect(h.output.indexOf("y := a + 1;")).toBeLessThan(h.output.indexOf("RunTimer(IN :="));
-    expect(h.output.indexOf("RunTimer(IN :=")).toBeLessThan(h.output.indexOf("w := b;"));
+    expect(h.output.indexOf("y := a + 1;")).toBeLessThan(h.output.indexOf("PID"));
+    expect(h.output.indexOf("PID")).toBeLessThan(h.output.indexOf("w := b;"));
   });
 
   it("routes a primitive declaration canonically, and a primitive-element array canonically (arrays active)", () => {
@@ -36,8 +36,8 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
   });
 
   it("a canonical-active statement containing a legacy node routes to legacy as a unit (no crash, no split)", () => {
-    // IF whose body contains a timer — structurally inseparable → whole IF legacy.
-    const src = "IF x THEN\n  TON(T1);\nEND_IF;\ny := 1;";
+    // IF whose body contains a PID (still legacy-only) — structurally inseparable → whole IF legacy.
+    const src = "IF x THEN\n  PID(Loop1);\nEND_IF;\ny := 1;";
     const h = compileHybrid(src, AB, MEL)!;
     expect(h.legacyNodeCount).toBe(1); // the IF (inseparable)
     expect(h.canonicalNodeCount).toBe(1); // y := 1
@@ -45,7 +45,7 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
   });
 
   it("is deterministic: repeated compilation yields identical output and counts", () => {
-    const src = "a := 1;\nTON(T);\nb := 2;";
+    const src = "a := 1;\nPID(L);\nb := 2;";
     const h1 = compileHybrid(src, AB, MEL)!;
     const h2 = compileHybrid(src, AB, MEL)!;
     expect(h1.output).toBe(h2.output);
@@ -54,7 +54,7 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
   });
 
   it("works in both language directions", () => {
-    const src = "d := e + 1;\nTON(T);";
+    const src = "d := e + 1;\nPID(L);";
     const ab = compileHybrid(src, AB, MEL)!;
     const mel = compileHybrid(src, MEL, AB)!;
     expect(ab.canonicalNodeCount).toBe(1);

@@ -20,7 +20,7 @@ import {
   type CompileResult,
 } from "../../server/compiler/contracts";
 
-const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nTON(RunTimer);"; // mixed: IF canonical, TON legacy
+const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nPID(Loop1);"; // mixed: IF canonical, PID legacy (manual-port)
 const MEL_SRC = "RunTimer(IN := start, PT := T#5s);";
 // A pure-legacy program (only unmigrated families) — compile() still equals
 // translate() here because a program with zero canonical nodes routes to the
@@ -38,14 +38,14 @@ describe("Phase 1 — compiler contracts", () => {
       expect(res.migration?.engine).toBe("legacy");
     });
 
-    it("ab2mel mixed program: IF is canonical while TON stays legacy (mixed routing)", () => {
+    it("ab2mel mixed program: IF is canonical while PID stays legacy (mixed routing)", () => {
       const res = compileLegacy(AB_SRC, "ab2mel");
       expect(res.migration?.engine).toBe("mixed");
       expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
       expect((res.migration?.legacyNodeCount ?? 0)).toBeGreaterThan(0);
       const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
       expect(out).toContain("IF x > 0 THEN"); // canonical control-flow emission
-      expect(out).toContain("RunTimer(IN :="); // legacy timer fragment
+      expect(out).toContain("PID"); // legacy manual-port fragment
     });
 
     it("mel2ab: compile output matches legacy translate output", () => {
@@ -164,10 +164,10 @@ describe("Phase 1 — compiler contracts", () => {
       const res: CompileResult = compileLegacy(AB_SRC, "ab2mel");
       expect(typeof res.compilerVersion).toBe("string");
       expect(res.irSchemaVersion).toBe("1.0.0");
-      // AB_SRC routes a TON (lossy) to legacy → an authoritative loss record is
+      // AB_SRC routes a PID (manual-port) → an authoritative loss record is
       // present and completeness is review_required (never silently complete).
       expect(res.semanticLosses.length).toBeGreaterThan(0);
-      expect(res.semanticLosses[0].category).toBe("timers");
+      expect(res.semanticLosses[0].category).toBe("process_control");
       expect(res.completeness).toBe("review_required");
       expect(["failed", "parsed", "analyzed", "generated", "review_required", "executable_complete"]).toContain(res.completeness);
     });

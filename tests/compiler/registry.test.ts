@@ -15,7 +15,7 @@ import { mitsubishiGxStFrontend, mitsubishiGxStBackend } from "../../server/comp
 import { compileLegacy } from "../../server/compiler/compat/legacy-adapter";
 import { isSourceEmitCapable, operationSupport } from "../../server/compiler/contracts";
 
-const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nTON(RunTimer);";
+const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nPID(Loop1);";
 const MEL_SRC = "RunTimer(IN := start, PT := T#5s);\nD100 := D200 + 1;";
 const L5K_SRC =
   'IE_VER := 2.25;\nCONTROLLER Demo (ProcessorType := "x")\n  PROGRAM Main\n    ROUTINE R\n      N: XIC(a)OTE(b) ;\n    END_ROUTINE\n  END_PROGRAM\nEND_CONTROLLER';
@@ -83,7 +83,7 @@ describe("Phase 2 — language registry + plugins", () => {
   });
 
   describe("orchestrator routing (no ab2mel/mel2ab)", () => {
-    it("routes an explicit Rockwell→Mitsubishi mixed request through hybrid (IF canonical, TON legacy)", () => {
+    it("routes an explicit Rockwell→Mitsubishi mixed request through hybrid (IF canonical, PID legacy)", () => {
       const reg = createDefaultRegistry();
       const res = compileWithRegistry(
         { sourceLanguage: "rockwell-logix-st", targetLanguage: "mitsubishi-gx-st", sourceArtifacts: [{ id: "<input>", content: AB_SRC }] },
@@ -92,7 +92,7 @@ describe("Phase 2 — language registry + plugins", () => {
       expect(res.migration?.engine).toBe("mixed");
       const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
       expect(out).toContain("IF x > 0 THEN");
-      expect(out).toContain("RunTimer(IN :=");
+      expect(out).toContain("PID");
       expect(res.sourceLanguage).toBe("rockwell-logix-st");
     });
 

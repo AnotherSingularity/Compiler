@@ -707,3 +707,32 @@ already covered by the expressions family. Canonical drops the inline `AT D<addr
 **Gate:** check 0 · test **209 passed/1 skipped** · verify:legacy-parity PASS (30, 0) ·
 verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
 PASS · corpus 7/7 · roundtrip 6/6 · build OK.
+
+## Typed Family Activation — Stages 4-6: timers + counters canonical-active, typed RES, canonical instance fields
+
+**Files:** `semantic/instance-members.ts` (instance detection, canonical field model, RES
+resolution); `semantic/pipeline.ts` (instance-field pass); `lowering/st-emitter.ts` (timer/
+counter FB emission + instance_field + reset); `migration/families.ts` (instance_field gating;
+timers/counters `canonical_active`); `migration/{fixtures,approvals}.ts` (6 timer/counter
+fixtures, hash-pinned); `tests/compiler/semantic/timers-counters.test.ts` + updated mixed-routing
+tests (now use PID as the legacy-only op).
+
+**Result:**
+- **Canonical instance fields:** timer/counter instances are detected from operation usage
+  (never from names). `T.DN/.ACC` etc. lower to canonical `instance_field` nodes (done/preset/
+  accumulator/...) and are re-spelled per target (`.DN`↔`.Q`, `.ACC`↔`.ET/.CV`). Undetected
+  vendor-field member accesses keep the safe legacy fallback (honest — can't confirm the kind).
+- **timers/counters canonical-active:** `TON/TOF/RTO/CTU/CTD` emit target FB invocations. The
+  enable and preset are NOT in the ST source, so they emit explicit `TODO_<inst>_enable` /
+  `TODO_<inst>_preset` placeholders — NEVER `T#0ms` or any apparently-valid zero — with a
+  structured timers/counters loss and review_required.
+- **Type-aware RES:** `RES(x)` resolves `x`'s kind from actual timer/counter usage (not the
+  name, not the mnemonic) → canonical timer_reset / counter_reset. An unresolvable operand
+  becomes an explicit unsupported/manual-port node with a loss record — never guessed.
+
+Corpus: 04_FEN20 20/2, tank_pid 17/1 (timers now canonical). 6 hash-pinned parity approvals
+classified `semantic_loss_now_explicit`.
+
+**Gate:** check 0 · test **218 passed/1 skipped** · verify:legacy-parity PASS (36, 0) ·
+verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
+PASS · corpus 7/7 · roundtrip 6/6 · build OK.

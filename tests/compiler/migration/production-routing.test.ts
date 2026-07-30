@@ -5,17 +5,14 @@ import { compileLegacy } from "../../../server/compiler/compat/legacy-adapter";
 import { defaultRegistry } from "../../../server/compiler/migration/families";
 
 describe("Stage 3 — production routing (expressions/assignments/control_flow are canonical-active)", () => {
-  it("registry marks expressions/assignments/control_flow/declarations/conversions/arrays_structures canonical_active, timers/counters/calls legacy", () => {
+  it("registry marks the typed families canonical_active, downstream families legacy", () => {
     const reg = defaultRegistry();
-    expect(reg.isActive("expressions")).toBe(true);
-    expect(reg.isActive("assignments")).toBe(true);
-    expect(reg.isActive("control_flow")).toBe(true);
-    expect(reg.isActive("declarations")).toBe(true);
-    expect(reg.isActive("conversions")).toBe(true);
-    expect(reg.isActive("arrays_structures")).toBe(true);
-    expect(reg.isActive("timers")).toBe(false);
-    expect(reg.isActive("counters")).toBe(false);
-    expect(reg.isActive("calls")).toBe(false);
+    for (const f of ["expressions", "assignments", "control_flow", "declarations", "conversions", "arrays_structures", "timers", "counters"] as const) {
+      expect(reg.isActive(f), f).toBe(true);
+    }
+    for (const f of ["copy_move", "bit_operations", "calls", "function_blocks", "unsupported_manual_port", "ladder"] as const) {
+      expect(reg.isActive(f), f).toBe(false);
+    }
   });
 
   it("primitive AND array VAR declarations compile via the CANONICAL engine; a non-primitive-element array stays legacy", () => {
@@ -49,15 +46,26 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     }
   });
 
-  it("a mixed program (IF canonical + timer legacy) routes hybrid, not whole-program legacy; IF stays canonical", () => {
-    const src = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nTON(RunTimer);";
+  it("a mixed program (IF canonical + PID legacy) routes hybrid, not whole-program legacy; IF stays canonical", () => {
+    const src = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nPID(Loop1);";
     const res = compileLegacy(src, "ab2mel");
     expect(res.migration?.engine).toBe("mixed");
     expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
     expect((res.migration?.legacyNodeCount ?? 0)).toBeGreaterThan(0);
     const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
     expect(out).toContain("IF x > 0 THEN"); // canonical
-    expect(out).toContain("RunTimer(IN :="); // legacy fragment
+    expect(out).toContain("PID"); // legacy fragment (manual-port)
+  });
+
+  it("a timer program now routes CANONICAL (timers active): FB invoke + target-correct field", () => {
+    const res = compileLegacy("TON(RunTimer);\nx := RunTimer.DN;", "ab2mel");
+    expect(res.migration?.engine).toBe("canonical");
+    const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
+    expect(out).toContain("RunTimer(IN := TODO_RunTimer_enable, PT := TODO_RunTimer_preset);");
+    expect(out).toContain("x := RunTimer.Q;"); // .DN rewritten to .Q for the MEL target
+    expect(out).not.toContain("T#0ms"); // never a fake zero preset
+    expect(res.semanticLosses.some((l) => l.category === "timers")).toBe(true);
+    expect(res.completeness).toBe("review_required");
   });
 
   it("a mixed program with a function call keeps the assignment canonical and the call legacy", () => {

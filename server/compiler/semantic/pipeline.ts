@@ -19,6 +19,7 @@ import { normalizeStProgram } from "../ir/normalize";
 import { normalizeProgramOperations } from "./operation-normalization";
 import { resolveProgram } from "./resolver";
 import { lowerConversions } from "./conversion-lowering";
+import { lowerInstanceFields } from "./instance-members";
 import { applyCapabilityDispositions } from "../capability/evaluator";
 import { manifestForTarget } from "../capability/manifests";
 
@@ -41,6 +42,9 @@ export function buildSemanticProgram(
   );
   const resolved = resolveProgram(normalized);
   const converted = lowerConversions(resolved);
+  // Timer/counter instance fields + type-aware RES (needs the target dialect for
+  // field spelling and the resolved operations for instance detection).
+  const withInstances = lowerInstanceFields(converted, targetLanguage);
   const manifest = manifestForTarget(targetLanguage);
-  return manifest ? applyCapabilityDispositions(converted, manifest) : converted;
+  return manifest ? applyCapabilityDispositions(withInstances, manifest) : withInstances;
 }
