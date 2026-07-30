@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { compileLegacy } from "../../../server/compiler/compat/legacy-adapter";
-import { translate } from "../../../server/translate";
-import { tryCanonicalCompile } from "../../../server/compiler/migration/routing";
 import { defaultRegistry } from "../../../server/compiler/migration/families";
 
 describe("Stage 3 — production routing (expressions/assignments/control_flow are canonical-active)", () => {
@@ -22,15 +20,16 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     const prim = compileLegacy("VAR\n  cnt : DINT;\n  ok : BOOL := 1;\nEND_VAR\ncnt := cnt + 1;", "ab2mel");
     expect(prim.migration?.engine).toBe("canonical");
     expect(prim.artifacts.find((a) => a.name === "output.st")?.content).toContain("cnt : DINT;");
+    // array declaration is legacy, but the assignment stays canonical → mixed
     const arr = compileLegacy("VAR\n  buf : ARRAY[0..9] OF DINT;\nEND_VAR\nbuf[0] := 1;", "ab2mel");
-    expect(arr.migration?.engine).toBe("legacy");
+    expect(arr.migration?.engine).toBe("mixed");
   });
 
   it("a pure expression/assignment program compiles via the CANONICAL engine", () => {
     const res = compileLegacy("y := a + b * 2 - 1;", "ab2mel");
     expect(res.migration?.engine).toBe("canonical");
     expect(res.artifacts.find((a) => a.name === "output.st")?.content).toBe("y := a + b * 2 - 1;");
-    expect(res.diagnostics.some((d) => d.code === "MIGRATION_CANONICAL_PATH")).toBe(true);
+    expect(res.diagnostics.some((d) => d.code === "MIGRATION_HYBRID_ROUTING")).toBe(true);
   });
 
   it("a pure control-flow program compiles via the CANONICAL engine, both directions", () => {
@@ -44,30 +43,32 @@ describe("Stage 3 — production routing (expressions/assignments/control_flow a
     }
   });
 
-  it("a program with an unmigrated family (timer) falls back to LEGACY and stays byte-identical", () => {
+  it("a mixed program (IF canonical + timer legacy) routes hybrid, not whole-program legacy; IF stays canonical", () => {
     const src = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nTON(RunTimer);";
     const res = compileLegacy(src, "ab2mel");
-    expect(res.migration?.engine).toBe("legacy");
-    expect(res.artifacts.find((a) => a.name === "output.st")?.content).toBe(translate(src, "ab2mel").output);
+    expect(res.migration?.engine).toBe("mixed");
+    expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
+    expect((res.migration?.legacyNodeCount ?? 0)).toBeGreaterThan(0);
+    const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
+    expect(out).toContain("IF x > 0 THEN"); // canonical
+    expect(out).toContain("RunTimer(IN :="); // legacy fragment
   });
 
-  it("a program with a function call (calls family) falls back to LEGACY", () => {
+  it("a mixed program with a function call keeps the assignment canonical and the call legacy", () => {
     const res = compileLegacy("z := 1;\nMyFunc(a, b);", "ab2mel");
-    expect(res.migration?.engine).toBe("legacy");
+    expect(res.migration?.engine).toBe("mixed");
+    expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
   });
 
-  it("canonical routing is deterministic and covers every corpus fixture via legacy fallback (no crash)", () => {
-    // Corpus fixtures mix families → must route legacy and remain non-empty.
+  it("every corpus fixture executes a NONZERO canonical node count via hybrid routing", () => {
+    // Corpus fixtures mix canonical (assignments/IF) with legacy families →
+    // hybrid must produce canonical nodes, not whole-program legacy.
     const dir = join(__dirname, "../../corpus/fixtures");
     for (const f of ["01_ARRAY100_AVERAGE.st", "05_HMI_ALARM_MESSAGE.st"]) {
       const src = readFileSync(join(dir, f), "utf8");
       const res = compileLegacy(src, "ab2mel");
       expect(res.artifacts.find((a) => a.name === "output.st")?.content?.length).toBeGreaterThan(0);
+      expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
     }
-  });
-
-  it("tryCanonicalCompile returns null for L5K project sources (not eligible)", () => {
-    const l5k = 'IE_VER := 2.25;\nCONTROLLER Demo (ProcessorType := "x")\nEND_CONTROLLER';
-    expect(tryCanonicalCompile(l5k, "rockwell-l5k", "mitsubishi-gx-st")).toBeNull();
   });
 });

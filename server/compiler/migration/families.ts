@@ -121,6 +121,44 @@ export function familyOfStatement(stmt: Statement): MigrationFamily {
   }
 }
 
+/**
+ * A statement routes canonical only if its ENTIRE subtree is canonically
+ * emittable: its family is active, its expressions are canonical, AND every
+ * nested statement is itself fully canonical. If a canonical-active statement
+ * (e.g. IF) contains a legacy-only node (e.g. a timer) it is structurally
+ * inseparable — the whole statement routes to legacy (the active nodes inside
+ * are NOT counted as canonical; no pretending).
+ */
+export function statementFullyCanonical(stmt: Statement, isActive: (f: MigrationFamily) => boolean): boolean {
+  const fam = familyOfStatement(stmt);
+  if (!isActive(fam)) return false;
+  if (!statementOwnExpressions(stmt).every(expressionFullyCanonical)) return false;
+  return childStatementsOf(stmt).every((s) => statementFullyCanonical(s, isActive));
+}
+
+function statementOwnExpressions(stmt: Statement): Expression[] {
+  switch (stmt.node) {
+    case "assignment": return [stmt.target, stmt.value];
+    case "conditional": return stmt.branches.map((b) => b.condition);
+    case "case": return [stmt.selector, ...stmt.branches.flatMap((b) => b.labels)];
+    case "for": return [stmt.from, stmt.to, ...(stmt.by ? [stmt.by] : [])];
+    case "while": return [stmt.condition];
+    case "repeat": return [stmt.until];
+    default: return [];
+  }
+}
+
+function childStatementsOf(stmt: Statement): Statement[] {
+  switch (stmt.node) {
+    case "conditional": return [...stmt.branches.flatMap((b) => b.body), ...(stmt.elseBody ?? [])];
+    case "case": return [...stmt.branches.flatMap((b) => b.body), ...(stmt.elseBody ?? [])];
+    case "for":
+    case "while":
+    case "repeat": return stmt.body;
+    default: return [];
+  }
+}
+
 /** Expression kinds the canonical ST emitter fully supports (the `expressions` family). */
 const CANONICAL_EXPRESSION_KINDS = new Set<string>([
   "literal", "symbol_ref", "member_access", "array_access", "unary", "binary",

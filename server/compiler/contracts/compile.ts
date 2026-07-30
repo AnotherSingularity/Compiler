@@ -89,7 +89,8 @@ export interface MigrationExecutionSummary {
   shadowComparisonCount: number;
   approvedDifferenceCount: number;
   unapprovedDifferenceCount: number;
-  engine: "canonical" | "legacy";
+  /** "mixed" = some statements canonical, some legacy, in one program. */
+  engine: "canonical" | "legacy" | "mixed";
 }
 
 export interface CompileHashes {

@@ -83,15 +83,16 @@ describe("Phase 2 — language registry + plugins", () => {
   });
 
   describe("orchestrator routing (no ab2mel/mel2ab)", () => {
-    it("routes an explicit Rockwell→Mitsubishi request and matches legacy output", () => {
+    it("routes an explicit Rockwell→Mitsubishi mixed request through hybrid (IF canonical, TON legacy)", () => {
       const reg = createDefaultRegistry();
       const res = compileWithRegistry(
         { sourceLanguage: "rockwell-logix-st", targetLanguage: "mitsubishi-gx-st", sourceArtifacts: [{ id: "<input>", content: AB_SRC }] },
         reg,
       );
-      const legacy = translate(AB_SRC, "ab2mel");
-      expect(res.artifacts.find((a) => a.name === "output.st")?.content).toBe(legacy.output);
-      expect(res.ok).toBe(legacy.ok);
+      expect(res.migration?.engine).toBe("mixed");
+      const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
+      expect(out).toContain("IF x > 0 THEN");
+      expect(out).toContain("RunTimer(IN :=");
       expect(res.sourceLanguage).toBe("rockwell-logix-st");
     });
 
@@ -128,17 +129,18 @@ describe("Phase 2 — language registry + plugins", () => {
   });
 
   describe("legacy adapter now routes through the registry (equivalence preserved)", () => {
-    it("compileLegacy ab2mel still matches translate()", () => {
-      const legacy = translate(AB_SRC, "ab2mel");
+    it("compileLegacy ab2mel routes the mixed program through hybrid", () => {
       const res = compileLegacy(AB_SRC, "ab2mel");
-      expect(res.artifacts.find((a) => a.name === "output.st")?.content).toBe(legacy.output);
-      expect(res.stats.translatedNodes).toBe(legacy.stats.translatedNodes);
+      expect(res.migration?.engine).toBe("mixed");
+      expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
+      expect((res.migration?.legacyNodeCount ?? 0)).toBeGreaterThan(0);
     });
 
-    it("compileLegacy mel2ab still matches translate()", () => {
-      const legacy = translate(MEL_SRC, "mel2ab");
+    it("compileLegacy mel2ab routes the mixed program through hybrid (D100 assignment canonical, FB legacy)", () => {
       const res = compileLegacy(MEL_SRC, "mel2ab");
-      expect(res.artifacts.find((a) => a.name === "output.st")?.content).toBe(legacy.output);
+      expect(res.migration?.engine).toBe("mixed");
+      const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
+      expect(out).toContain("D100 := D200 + 1;");
     });
   });
 

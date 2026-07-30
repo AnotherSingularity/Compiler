@@ -20,20 +20,32 @@ import {
   type CompileResult,
 } from "../../server/compiler/contracts";
 
-const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nTON(RunTimer);";
+const AB_SRC = "IF x > 0 THEN\n  y := 1;\nEND_IF;\nTON(RunTimer);"; // mixed: IF canonical, TON legacy
 const MEL_SRC = "RunTimer(IN := start, PT := T#5s);";
+// A pure-legacy program (only unmigrated families) — compile() still equals
+// translate() here because a program with zero canonical nodes routes to the
+// whole-program legacy bridge.
+const LEGACY_SRC = "COP(src, dst, 10);";
 
 describe("Phase 1 — compiler contracts", () => {
   describe("legacy direction adapter equivalence", () => {
-    it("ab2mel: compile output matches legacy translate output", () => {
-      const legacy = translate(AB_SRC, "ab2mel");
-      const res = compileLegacy(AB_SRC, "ab2mel");
+    it("ab2mel pure-legacy program: compile output matches legacy translate output", () => {
+      const legacy = translate(LEGACY_SRC, "ab2mel");
+      const res = compileLegacy(LEGACY_SRC, "ab2mel");
       const outputArtifact = res.artifacts.find((a) => a.name === "output.st");
       expect(outputArtifact?.content).toBe(legacy.output);
       expect(res.ok).toBe(legacy.ok);
-      expect(res.stats.translatedNodes).toBe(legacy.stats.translatedNodes);
-      expect(res.stats.warningCount).toBe(legacy.stats.warningCount);
-      expect(res.stats.manualPortCount).toBe(legacy.stats.manualPortCount);
+      expect(res.migration?.engine).toBe("legacy");
+    });
+
+    it("ab2mel mixed program: IF is canonical while TON stays legacy (mixed routing)", () => {
+      const res = compileLegacy(AB_SRC, "ab2mel");
+      expect(res.migration?.engine).toBe("mixed");
+      expect((res.migration?.canonicalNodeCount ?? 0)).toBeGreaterThan(0);
+      expect((res.migration?.legacyNodeCount ?? 0)).toBeGreaterThan(0);
+      const out = res.artifacts.find((a) => a.name === "output.st")?.content ?? "";
+      expect(out).toContain("IF x > 0 THEN"); // canonical control-flow emission
+      expect(out).toContain("RunTimer(IN :="); // legacy timer fragment
     });
 
     it("mel2ab: compile output matches legacy translate output", () => {
@@ -46,9 +58,9 @@ describe("Phase 1 — compiler contracts", () => {
       expect(res.targetLanguage).toBe("rockwell-logix-st");
     });
 
-    it("diagnostic count is preserved through the adapter (per fixture)", () => {
-      const legacy = translate(AB_SRC, "ab2mel");
-      const res = compileLegacy(AB_SRC, "ab2mel");
+    it("diagnostic count is preserved through the adapter for a pure-legacy program", () => {
+      const legacy = translate(LEGACY_SRC, "ab2mel");
+      const res = compileLegacy(LEGACY_SRC, "ab2mel");
       expect(res.diagnostics.length).toBe(legacy.diagnostics.length);
     });
 

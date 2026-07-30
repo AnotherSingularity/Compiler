@@ -21,7 +21,7 @@ import {
   type GeneratedArtifact,
 } from "../contracts";
 import type { LanguageRegistry } from "./registry";
-import { tryCanonicalCompile } from "../migration/routing";
+import { compileHybrid } from "../migration/hybrid";
 
 function fail(
   request: CompileRequest,
@@ -106,37 +106,47 @@ export function compileWithRegistry(request: CompileRequest, registry: LanguageR
     ]);
   }
 
-  // ── Canonical pipeline (active migration families) ──────────────────────
-  // If the whole program is covered by canonical-active families, emit via the
-  // canonical lowering/emission path. Otherwise fall through to the legacy
-  // engine (which still owns unmigrated families). This is the incremental
-  // production migration: canonical for what's activated, legacy for the rest.
-  const canonical = tryCanonicalCompile(source, resolvedSource, request.targetLanguage);
-  if (canonical) {
+  // ── Mixed-program (hybrid) routing ──────────────────────────────────────
+  // Route each statement to the canonical backend if its family is
+  // canonical-active, else to the legacy engine — even when they interleave in
+  // one program. Used whenever the program has at least one canonical node;
+  // pure-legacy programs fall through to the whole-program legacy bridge (which
+  // also produces mapping/labels artifacts).
+  const hybrid = compileHybrid(source, resolvedSource, request.targetLanguage);
+  if (hybrid && hybrid.canonicalNodeCount > 0) {
+    const artifacts: GeneratedArtifact[] = [
+      { kind: "structured_text", language: request.targetLanguage, name: "output.st", content: hybrid.output },
+    ];
+    const engine = hybrid.legacyNodeCount > 0 ? "mixed" : "canonical";
     return {
       ok: true,
-      completeness: "executable_complete",
+      completeness: hybrid.legacyNodeCount > 0 ? "review_required" : "executable_complete",
       compilerVersion: COMPILER_VERSION,
       irSchemaVersion: IR_SCHEMA_VERSION,
       sourceLanguage: resolvedSource,
       targetLanguage: request.targetLanguage,
-      artifacts: canonical.artifacts,
-      diagnostics: canonical.diagnostics,
+      artifacts,
+      diagnostics: hybrid.diagnostics,
       semanticLosses: [],
       stats: {
         inputLines: source.split("\n").length,
-        outputLines: canonical.outputLines,
+        outputLines: hybrid.outputLines,
         warningCount: 0,
         manualPortCount: 0,
         errorCount: 0,
-        translatedNodes: canonical.translatedNodes,
+        translatedNodes: hybrid.canonicalNodeCount + hybrid.legacyNodeCount,
       },
-      hashes: { source: sha256Hex(source), artifacts: hashValue(canonical.artifacts), diagnostics: hashValue(canonical.diagnostics) },
-      migration: canonical.summary,
+      hashes: { source: sha256Hex(source), artifacts: hashValue(artifacts), diagnostics: hashValue(hybrid.diagnostics) },
+      migration: {
+        ...hybrid.summary,
+        legacyNodeCount: hybrid.legacyNodeCount,
+        canonicalNodeCount: hybrid.canonicalNodeCount,
+        engine,
+      },
     };
   }
 
-  // ── Emit (transitional legacy bridge — unmigrated families) ─────────────
+  // ── Emit (transitional legacy bridge — pure-legacy programs) ─────────────
   const emit = backend.emitFromSource(resolvedSource, source, { options: request.options });
   const outputArtifact = emit.artifacts.find((a) => a.name === "output.st");
   const outputEmpty = !outputArtifact || outputArtifact.content.trim() === "";

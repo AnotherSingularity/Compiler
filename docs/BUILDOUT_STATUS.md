@@ -484,3 +484,63 @@ entry from KNOWN_LIMITATIONS.
 items of this order — **mixed-program routing** (canonical families staying canonical when
 interleaved with legacy families; nonzero corpus canonical nodes), full symbol/type
 resolution, and the typed families — remain to be built; see below.
+
+---
+
+## Stage 2 — Mixed-program (hybrid) routing + Stage 12 corpus-migration
+
+**Status:** COMPLETE · **Commit:** `<stage2mixed>` (this commit)
+
+**Files (new):** `server/compiler/migration/hybrid.ts`, `scripts/verify-corpus-migration.ts`,
+`tests/compiler/migration/hybrid.test.ts`. **Changed:** `registry/orchestrator.ts` (hybrid
+routing), `migration/families.ts` (`statementFullyCanonical`), `contracts/compile.ts`
+(`engine: "mixed"`), `package.json` (`verify:corpus-migration`), and the equivalence tests in
+`contracts.test.ts` / `registry.test.ts` / `production-routing.test.ts` (updated to assert
+mixed behavior instead of whole-program fallback).
+
+**Architectural result — whole-program fallback REPLACED by per-statement routing:**
+- `compileHybrid()` segments a routine's top-level statements into canonical vs legacy runs.
+  Canonical runs are lowered+emitted directly from canonical IR (`st-emitter`). Legacy runs
+  are emitted by the REAL legacy emitter (`emitMEL`/`emitAB`) called on the ORIGINAL AST
+  subset for that run + the original source lines — NOT reconstructed source, NOT regex
+  splicing. Segments are assembled in source order.
+- **Structural inseparability handled honestly:** `statementFullyCanonical` recurses the whole
+  subtree; a canonical-active statement (e.g. `IF`) that contains a legacy-only node (e.g. a
+  timer) routes to legacy as a unit — the inner active nodes are NOT counted as canonical (no
+  pretending). This fixed a real crash where the canonical emitter recursed into a nested
+  `semantic_operation`.
+- Declarations route per-block (all-primitive → canonical VAR; else legacy).
+- `CompileResult.migration` now reports `engine: "canonical" | "legacy" | "mixed"` plus
+  canonical/legacy node + segment counts and per-family execution.
+- Pure-legacy programs (0 canonical nodes) still use the whole-program legacy bridge (so
+  mapping/labels artifacts are preserved) — `compile(LEGACY_SRC) == translate(LEGACY_SRC)`.
+
+**Real corpus execution (via `compile()` / `verify:corpus-migration`):**
+| Fixture | engine | canonical | legacy |
+|---|---|---|---|
+| 01_ARRAY100_AVERAGE | canonical | 5 | 0 |
+| 02_ARRAY2000_AVERAGE | canonical | 5 | 0 |
+| 03_CHECK_SUM | canonical | 8 | 0 |
+| 04_FEN20_DATA_MOVE | **mixed** | 19 | 3 |
+| 05_HMI_ALARM_MESSAGE | canonical | 2 | 0 |
+| tank_level_pid_loop | **mixed** | 16 | 2 |
+| mel/runtime_basics | **mixed** | 3 | 15 |
+
+**Every corpus fixture now executes a nonzero canonical node count; 3 fixtures execute BOTH
+canonical and legacy segments in one compilation** (Stage 2 gate MET; nonnegotiable #2 MET).
+
+**Commands/tests:** `pnpm check` 0 · `pnpm test` **161 passed, 1 skipped** · `pnpm
+test:migration` 21 · `pnpm test:ir` 45 · `pnpm test:semantic` 23 · `pnpm verify:legacy-parity`
+PASS (20, 0 unapproved) · `pnpm verify:corpus-migration` PASS (7 fixtures, 3 mixed, 0
+whole-program-legacy) · corpus 7/7 · roundtrip 6/6 · build OK.
+
+**Nonnegotiables from this order — status:** #1 mixed routing operational ✅ · #2 nonzero
+corpus canonical nodes ✅ · #3 multi-branch CASE corrected ✅ · #10 no silent family fallback
+✅ (inseparable statements route legacy as a unit, reported). Still open: #4 full symbol/type
+resolution, #5 arrays/structures + conversions canonical-active, #6 timers/counters typed,
+#7 semantic-loss records, #8 legacy `translate()` routed through the pipeline. These require
+the semantic resolver + typed lowering and are the next work items.
+
+**Honest status:** `compile()` uses mixed canonical/legacy routing. Legacy `translate()` is
+still the whole-program legacy engine (Stage 11 flip pending — it needs the same hybrid path;
+deferred to keep this commit verified and bounded).
