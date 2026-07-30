@@ -620,3 +620,30 @@ modeling arrives with the timers/counters family activation.) Regression test ad
 **Gate:** check 0 · test **187 passed, 1 skipped** · verify:legacy-parity PASS (20,0) ·
 verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · corpus 7/7 ·
 roundtrip 6/6 · build OK.
+
+## Typed Semantic Core — Stage 4: authoritative capability evaluation
+
+**Files:** `server/compiler/capability/{evaluator,manifests,index}.ts`;
+`server/compiler/languages/rockwell.ts` (manifest completed + a real drift fixed);
+`server/compiler/migration/hybrid.ts` (capability pass wired in); `scripts/verify-capabilities.ts`;
+`package.json` (`verify:capabilities`); `tests/compiler/semantic/capability.test.ts`.
+
+**Result:** The per-target CapabilityManifest is now AUTHORITATIVE, not informational.
+`applyCapabilityDispositions` re-stamps every semantic operation's disposition from the target
+manifest (manifest-declared rules win; undeclared ops keep the normalization disposition —
+never silently upgraded). A bridge (`IR_TO_CAPABILITY_KEY`) reconciles the two operation
+taxonomies (IR snake_case ↔ contracts PascalCase); intentionally-unmapped ops (inline
+`limit_test`, family-resolved resets) are explicit.
+
+**Drift caught + fixed:** `verify:capabilities` found the rockwell (mel2ab) manifest declared
+`TimerOnDelay: equivalent_lowering` while the AB emitter actually generates a manual-port
+template (no named-arg FB invoke in AB) — corrected to `lossy`. The mitsubishi (ab2mel)
+manifest was completed (added TimerOffDelay, SynchronousBlockCopy, MaskedMove, ProgramCall;
+refreshed the stale "T#0ms placeholder" note). The gate now enforces: every emittable
+operation maps to a capability key, is declared in the strict (ab2mel) target manifest, and its
+manifest disposition equals the normalization disposition — the manifest and pipeline can no
+longer drift unnoticed.
+
+**Gate:** check 0 · test **193 passed, 1 skipped** · verify:legacy-parity PASS (20,0) ·
+verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
+PASS (12 ops, 0 issues) · corpus 7/7 · roundtrip 6/6 · build OK.

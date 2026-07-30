@@ -23,6 +23,8 @@ import { emitAB } from "../emitter-ab";
 import { normalizeStProgram } from "../ir/normalize";
 import { normalizeProgramOperations } from "../semantic/operation-normalization";
 import { resolveProgram } from "../semantic/resolver";
+import { applyCapabilityDispositions } from "../capability/evaluator";
+import { manifestForTarget } from "../capability/manifests";
 import { emitStatements, type StEmitTarget } from "../lowering/st-emitter";
 import { emitDeclarations, declsAreCanonical } from "../lowering/st-decl-emitter";
 import {
@@ -76,9 +78,15 @@ export function compileHybrid(
   const sourceLines = source.split("\n");
   const rawAst = parsed.ast;
 
-  const program = resolveProgram(
+  const resolved = resolveProgram(
     normalizeProgramOperations(normalizeStProgram("MAIN", rawAst, { sourceId: "<input>", language: sourceLanguage })),
   );
+  // Authoritative capability pass: the target manifest re-stamps each semantic
+  // operation's disposition (manifest-declared rules win; undeclared operations
+  // keep their normalization disposition). This is what makes the manifest
+  // authoritative rather than informational — loss records derive from it.
+  const targetManifest = manifestForTarget(targetLanguage);
+  const program = targetManifest ? applyCapabilityDispositions(resolved, targetManifest) : resolved;
   const canonicalBody = program.routines[0].body;
   const rawBody = rawAst.filter((n) => n.kind !== "var_block" && n.kind !== "comment");
   if (rawBody.length !== canonicalBody.length) return null; // alignment safety

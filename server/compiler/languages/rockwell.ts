@@ -78,11 +78,15 @@ function mitsubishiTargetManifest(): CapabilityManifest {
       RepeatUntil: { level: "supported", disposition: "exact" },
       FunctionCall: { level: "supported", disposition: "equivalent_lowering" },
       FunctionBlockInvoke: { level: "supported", disposition: "equivalent_lowering" },
-      TimerOnDelay: { level: "conditional", disposition: "lossy", differences: ["PT preset not lexically convertible; emitted as T#0ms placeholder"], requiresManualCompletion: true, diagnosticCode: "AB_MEL_TIMER_001" },
+      ProgramCall: { level: "supported", disposition: "exact", differences: ["JSR → routine invocation"] },
+      TimerOnDelay: { level: "conditional", disposition: "lossy", differences: ["IN enable and PT preset not lexically derivable; emitted with placeholders requiring manual completion"], requiresManualCompletion: true, diagnosticCode: "AB_MEL_TIMER_001" },
+      TimerOffDelay: { level: "conditional", disposition: "lossy", differences: ["IN enable and PT preset not lexically derivable; emitted with placeholders requiring manual completion"], requiresManualCompletion: true, diagnosticCode: "AB_MEL_TIMER_001" },
       TimerRetentive: { level: "conditional", disposition: "lossy", differences: ["reset path must be wired manually"], requiresManualCompletion: true, diagnosticCode: "AB_MEL_TIMER_002" },
       CounterUp: { level: "conditional", disposition: "lossy", requiresManualCompletion: true },
       CounterDown: { level: "conditional", disposition: "lossy", requiresManualCompletion: true },
       BlockCopy: { level: "conditional", disposition: "equivalent_lowering", differences: ["confirm MEL block-move primitive"] },
+      SynchronousBlockCopy: { level: "conditional", disposition: "equivalent_lowering", differences: ["CPS synchronous copy → MEL block-move; confirm atomicity semantics"] },
+      MaskedMove: { level: "conditional", disposition: "equivalent_lowering", differences: ["MVM masked move → MEL AND/OR mask sequence; confirm mask semantics"] },
       PIDControl: { level: "manual", disposition: "manual_port", requiresManualCompletion: true, diagnosticCode: "AB_MEL_PID_001" },
       MotionCommand: { level: "unsupported", disposition: "unsupported", diagnosticCode: "AB_MEL_MOTION_001" },
       MessageTransfer: { level: "unsupported", disposition: "unsupported", diagnosticCode: "AB_MEL_MSG_001" },
@@ -137,7 +141,10 @@ export const rockwellLogixStBackend: LanguageBackend & SourceEmitCapable = {
         ConditionalBranch: { level: "supported", disposition: "exact" },
         CaseSelection: { level: "supported", disposition: "exact" },
         FunctionBlockInvoke: { level: "conditional", disposition: "equivalent_lowering", differences: ["MEL FB call → AB structure; verify semantics"], diagnosticCode: "MEL_AB_FB_001" },
-        TimerOnDelay: { level: "conditional", disposition: "equivalent_lowering" },
+        // Emitting a timer MEL→AB has no direct AB equivalent (enable is a rung
+        // condition, not a named FB argument) → a manual-port template is
+        // generated. This is lossy, matching the normalization disposition.
+        TimerOnDelay: { level: "conditional", disposition: "lossy", differences: ["AB has no named-arg FB invoke; enable/preset must be re-wired manually"], requiresManualCompletion: true, diagnosticCode: "MEL_AB_TIMER_001" },
       },
       types: {
         Boolean: { level: "supported", disposition: "exact" },
