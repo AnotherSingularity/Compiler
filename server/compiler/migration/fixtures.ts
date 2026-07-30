@@ -16,6 +16,10 @@ const SNIPPETS: Array<{ id: string; family: string; source: string }> = [
   { id: "cf_while", family: "control_flow", source: "WHILE go DO\n  n := n - 1;\nEND_WHILE;" },
   { id: "decl_prim", family: "declarations", source: "VAR\n  cnt : DINT;\n  ok : BOOL := 1;\nEND_VAR\ncnt := cnt + 1;" },
   { id: "decl_real", family: "declarations", source: "VAR\n  rate : REAL := 1.5;\nEND_VAR\nrate := rate * 2.0;" },
+  // Conversions (canonical_active): TYPE_TO_TYPE reconstructs the exact IEC form.
+  { id: "conv_widen", family: "conversions", source: "r := DINT_TO_REAL(n);" },
+  { id: "conv_narrow", family: "conversions", source: "n := REAL_TO_INT(r);" },
+  { id: "conv_in_expr", family: "conversions", source: "r := DINT_TO_REAL(n) + 0.5;" },
 ];
 
 export const PARITY_FIXTURES: ParityFixture[] = SNIPPETS.flatMap((s) => [

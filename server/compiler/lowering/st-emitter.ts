@@ -77,13 +77,35 @@ export function emitExpression(expr: Expression, _t: StEmitTarget): string {
       return `${wrap(expr.left, p, _t)} ${LOGOP_TEXT[expr.op as LogicalOperator]} ${wrapRight(expr.right, p, _t)}`;
     }
     case "conversion": {
-      const to = expr.to.kind;
-      return `${to.toUpperCase()}(${emitExpression(expr.operand, _t)})`;
+      // Reconstruct the IEC `<FROM>_TO_<TO>(operand)` form. Source spellings are
+      // preserved on the canonical types so BYTE/WORD/DWORD round-trip exactly
+      // (they share a bit width/signedness with SINT/INT/DINT). The emitter only
+      // formats — from/to and safety were decided by the conversion-lowering
+      // pass, not here.
+      const from = conversionSpelling(expr.from);
+      const to = conversionSpelling(expr.to);
+      return `${from}_TO_${to}(${emitExpression(expr.operand, _t)})`;
     }
     case "range":
       return `${emitExpression(expr.low, _t)}..${emitExpression(expr.high, _t)}`;
     default:
       throw new UnsupportedByCanonicalEmitter(expr.node);
+  }
+}
+
+/** IEC spelling for a conversion FROM/TO type: preserved source spelling, else canonical. */
+function conversionSpelling(t: import("../ir/types").CanonicalType): string {
+  if (t.sourceSpelling) return t.sourceSpelling.toUpperCase();
+  switch (t.kind) {
+    case "boolean": return "BOOL";
+    case "integer": {
+      const m: Record<string, string> = { "8:true": "SINT", "8:false": "USINT", "16:true": "INT", "16:false": "UINT", "32:true": "DINT", "32:false": "UDINT", "64:true": "LINT", "64:false": "ULINT" };
+      return m[`${t.bits}:${t.signed}`] ?? "DINT";
+    }
+    case "real": return t.bits === 64 ? "LREAL" : "REAL";
+    case "time": return "TIME";
+    case "string": return "STRING";
+    default: return t.kind.toUpperCase();
   }
 }
 

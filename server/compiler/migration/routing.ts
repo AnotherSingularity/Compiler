@@ -15,8 +15,7 @@ import type { CanonicalProgram } from "../ir/project";
 import type { Expression } from "../ir/expressions";
 import type { Statement } from "../ir/statements";
 import { parseSTSourceWithDiagnostics } from "../parser";
-import { normalizeStProgram } from "../ir/normalize";
-import { normalizeProgramOperations } from "../semantic/operation-normalization";
+import { buildSemanticProgram } from "../semantic/pipeline";
 import { emitRoutineBody, type StEmitTarget } from "../lowering/st-emitter";
 import { emitDeclarations, declsAreCanonical } from "../lowering/st-decl-emitter";
 import {
@@ -83,7 +82,7 @@ function analyze(program: CanonicalProgram, reg: MigrationRegistry): Coverage {
   const walk = (stmt: Statement): void => {
     const fam = familyOfStatement(stmt);
     families.add(fam);
-    const exprsOk = statementExpressions(stmt).every(expressionFullyCanonical);
+    const exprsOk = statementExpressions(stmt).every((e) => expressionFullyCanonical(e, (f) => reg.isActive(f)));
     if (!exprsOk) { families.add("expressions"); }
     if (reg.isActive(fam) && exprsOk) canonicalNodeCount++;
     else {
@@ -125,7 +124,7 @@ export function tryCanonicalCompile(
   if (!isCanonicalEligibleSource(sourceLanguage)) return null;
   const parsed = parseSTSourceWithDiagnostics(source);
   if (parsed.partial) return null; // parse errors → legacy path handles reporting
-  const program = normalizeProgramOperations(normalizeStProgram("MAIN", parsed.ast, { sourceId: "<input>", language: sourceLanguage }));
+  const program = buildSemanticProgram(parsed.ast, sourceLanguage, targetLanguage);
   const cov = analyze(program, reg);
   if (!cov.covered) return null;
 

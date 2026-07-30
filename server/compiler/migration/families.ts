@@ -47,7 +47,7 @@ export const DEFAULT_FAMILY_STATUS: Record<MigrationFamily, MigrationStatus> = {
   control_flow: "canonical_active",
   declarations: "canonical_active",
   arrays_structures: "legacy_only",
-  conversions: "legacy_only",
+  conversions: "canonical_active",
   timers: "legacy_only",
   counters: "legacy_only",
   copy_move: "legacy_only",
@@ -132,7 +132,7 @@ export function familyOfStatement(stmt: Statement): MigrationFamily {
 export function statementFullyCanonical(stmt: Statement, isActive: (f: MigrationFamily) => boolean): boolean {
   const fam = familyOfStatement(stmt);
   if (!isActive(fam)) return false;
-  if (!statementOwnExpressions(stmt).every(expressionFullyCanonical)) return false;
+  if (!statementOwnExpressions(stmt).every((e) => expressionFullyCanonical(e, isActive))) return false;
   return childStatementsOf(stmt).every((s) => statementFullyCanonical(s, isActive));
 }
 
@@ -179,21 +179,31 @@ const VENDOR_REWRITTEN_INSTANCE_FIELDS = new Set<string>([
   "DN", "PRE", "ACC", "Q", "PT", "ET", "PV", "CV",
 ]);
 
-/** True if every expression under `expr` is emittable by the canonical expr family. */
-export function expressionFullyCanonical(expr: Expression): boolean {
+/**
+ * True if every expression under `expr` is emittable by the canonical expr
+ * family AND every family it requires is active. `isActive` gates family-specific
+ * expression kinds (e.g. a `conversion` node routes canonical only when the
+ * `conversions` family is active); it defaults to treating every family as
+ * active for callers that only care about emitter support.
+ */
+export function expressionFullyCanonical(
+  expr: Expression,
+  isActive: (f: MigrationFamily) => boolean = () => true,
+): boolean {
   if (!CANONICAL_EXPRESSION_KINDS.has(expr.node)) return false;
   switch (expr.node) {
     case "member_access":
       if (VENDOR_REWRITTEN_INSTANCE_FIELDS.has(expr.member.toUpperCase())) return false;
-      return expressionFullyCanonical(expr.object);
-    case "array_access": return expressionFullyCanonical(expr.array) && expr.indices.every(expressionFullyCanonical);
-    case "unary": return expressionFullyCanonical(expr.operand);
+      return expressionFullyCanonical(expr.object, isActive);
+    case "array_access": return expressionFullyCanonical(expr.array, isActive) && expr.indices.every((e) => expressionFullyCanonical(e, isActive));
+    case "unary": return expressionFullyCanonical(expr.operand, isActive);
     case "binary":
     case "comparison":
     case "logical":
-      return expressionFullyCanonical(expr.left) && expressionFullyCanonical(expr.right);
-    case "conversion": return expressionFullyCanonical(expr.operand);
-    case "range": return expressionFullyCanonical(expr.low) && expressionFullyCanonical(expr.high);
+      return expressionFullyCanonical(expr.left, isActive) && expressionFullyCanonical(expr.right, isActive);
+    case "conversion":
+      return isActive("conversions") && expressionFullyCanonical(expr.operand, isActive);
+    case "range": return expressionFullyCanonical(expr.low, isActive) && expressionFullyCanonical(expr.high, isActive);
     default: return true;
   }
 }

@@ -647,3 +647,40 @@ longer drift unnoticed.
 **Gate:** check 0 · test **193 passed, 1 skipped** · verify:legacy-parity PASS (20,0) ·
 verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
 PASS (12 ops, 0 issues) · corpus 7/7 · roundtrip 6/6 · build OK.
+
+---
+
+## Typed Family Activation — Stage 0: reconciliation (verified start)
+
+**Verified start:** branch `claude/happy-johnson-dy7zxl`, local HEAD = remote HEAD = `0ecd791`,
+clean tree, no merge/rebase/cherry-pick state. CI run `30544694047` (run #16) for `0ecd791` =
+completed/success.
+
+**Full gate (2026-07-30):** install 0 · check 0 · test **193 passed/1 skipped** · test:ir 45 ·
+test:semantic 54 · test:migration 22 · verify:legacy-parity PASS (20,0) ·
+verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
+PASS (12 ops, 0 issues) · corpus 7/7 · roundtrip 6/6 · build OK.
+
+Reconciled base for the Typed Family Activation order (conversions → arrays → timers →
+counters → translate() closure → downstream families).
+
+## Typed Family Activation — Stage 2: conversions canonical-active
+
+**Files:** `semantic/conversion-lowering.ts`, `semantic/pipeline.ts` (shared ordered pipeline);
+`migration/{hybrid,routing,families}.ts` (use pipeline; `expressionFullyCanonical` gates
+`conversion` on the conversions family); `lowering/st-emitter.ts` (reconstruct `<FROM>_TO_<TO>`
+via preserved source spellings); `loss/records.ts` (conversion-safety loss records);
+`migration/{fixtures,approvals}.ts` (6 conversion parity fixtures, hash-pinned);
+`tests/compiler/semantic/conversions-lowering.test.ts`. `conversions = canonical_active`.
+
+**Result:** `<TYPE>_TO_<TYPE>` calls (e.g. `DINT_TO_REAL`) are recognized as canonical
+`conversion` nodes with classified `ConversionSafety`, and emitted round-trip-exact (source
+spellings preserved so BYTE/WORD/DWORD survive). A shared `buildSemanticProgram` guarantees the
+production router and parity oracle analyze programs identically. Unsafe conversions
+(narrowing/precision_loss/signedness_change → lossy; reinterpretation/vendor_defined →
+manual_port; invalid → unsupported) now emit structured loss records that downgrade
+completeness. Conversions stay canonical beside legacy timers in mixed programs.
+
+**Gate:** check 0 · test **200 passed/1 skipped** · verify:legacy-parity PASS (26, 0) ·
+verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
+PASS · corpus 7/7 · roundtrip 6/6 · build OK.

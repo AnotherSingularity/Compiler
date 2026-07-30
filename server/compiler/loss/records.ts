@@ -17,9 +17,11 @@ import type { LanguageId, TranslationDisposition } from "../contracts/ids";
 import type { SourceSpan } from "../contracts/source";
 import type { SemanticLossRecord } from "../contracts/compile";
 import type { Statement } from "../ir/statements";
+import type { Expression, ConversionExpr, ConversionSafety } from "../ir/expressions";
 import type { SemanticOperationNode, SemanticOperationKind } from "../ir/operations";
 import type { CanonicalProgram } from "../ir/project";
 import type { NodeOrigin } from "../ir/nodes";
+import type { CanonicalType } from "../ir/types";
 
 export interface LossContext {
   sourceLanguage: LanguageId;
@@ -105,6 +107,70 @@ function spanOf(origin: NodeOrigin): SourceSpan | undefined {
   return origin.kind === "source" ? origin.span : undefined;
 }
 
+function typeSpelling(t: CanonicalType): string {
+  return t.sourceSpelling ?? t.kind;
+}
+
+/** Conversion safety → (disposition, category, description, action). Safe classes → null. */
+const CONVERSION_LOSS: Partial<Record<ConversionSafety, { disposition: TranslationDisposition; category: string; describe: (f: string, t: string) => string; action: string }>> = {
+  narrowing: { disposition: "lossy", category: "conversion_narrowing", describe: (f, t) => `Narrowing conversion ${f}→${t} truncates or overflows values outside the target range.`, action: "Confirm all runtime values fit the target type, or synthesize a checked conversion." },
+  signedness_change: { disposition: "lossy", category: "conversion_signedness", describe: (f, t) => `Signedness change ${f}→${t} reinterprets the sign bit; negative or high-bit values change meaning.`, action: "Confirm the value range excludes the affected sign/high-bit region." },
+  precision_loss: { disposition: "lossy", category: "conversion_precision", describe: (f, t) => `Precision-reducing conversion ${f}→${t} loses mantissa/representation.`, action: "Confirm the precision loss is acceptable for this signal." },
+  reinterpretation: { disposition: "manual_port", category: "conversion_reinterpretation", describe: (f, t) => `Bit reinterpretation ${f}→${t}; target semantics must be verified.`, action: "Verify the target performs the intended bit reinterpretation." },
+  vendor_defined: { disposition: "manual_port", category: "conversion_vendor", describe: (f, t) => `Vendor-defined conversion ${f}→${t}; a target library/construct is required.`, action: "Provide the target conversion facility or port manually." },
+  invalid: { disposition: "unsupported", category: "conversion_invalid", describe: (f, t) => `Invalid conversion ${f}→${t} has no meaning-preserving target form.`, action: "Remove or replace this conversion." },
+};
+
+function conversionLoss(conv: ConversionExpr, ctx: LossContext): SemanticLossRecord | null {
+  const profile = CONVERSION_LOSS[conv.safety];
+  if (!profile) return null; // identity / widening → no loss
+  const from = typeSpelling(conv.from), to = typeSpelling(conv.to);
+  return {
+    id: `loss_${conv.id}`, nodeId: conv.id, span: spanOf(conv.origin),
+    sourceLanguage: ctx.sourceLanguage, targetLanguage: ctx.targetLanguage,
+    category: profile.category, disposition: profile.disposition,
+    description: profile.describe(from, to),
+    sourceSemantics: [`value of type ${from}`], targetSemantics: [`value of type ${to} (${conv.safety})`],
+    requiredAction: profile.action,
+  };
+}
+
+/** Collect conversion losses from an expression tree. */
+function walkExpr(expr: Expression, ctx: LossContext, out: SemanticLossRecord[]): void {
+  switch (expr.node) {
+    case "conversion": {
+      const rec = conversionLoss(expr, ctx);
+      if (rec) out.push(rec);
+      walkExpr(expr.operand, ctx, out);
+      break;
+    }
+    case "member_access": walkExpr(expr.object, ctx, out); break;
+    case "array_access": walkExpr(expr.array, ctx, out); expr.indices.forEach((i) => walkExpr(i, ctx, out)); break;
+    case "unary": walkExpr(expr.operand, ctx, out); break;
+    case "binary":
+    case "comparison":
+    case "logical": walkExpr(expr.left, ctx, out); walkExpr(expr.right, ctx, out); break;
+    case "range": walkExpr(expr.low, ctx, out); walkExpr(expr.high, ctx, out); break;
+    case "function_call": expr.args.forEach((a) => walkExpr(a, ctx, out)); break;
+    case "fb_invoke": expr.namedArgs.forEach((a) => walkExpr(a.value, ctx, out)); break;
+    default: break;
+  }
+}
+
+function ownExpressions(stmt: Statement): Expression[] {
+  switch (stmt.node) {
+    case "assignment": return [stmt.target, stmt.value];
+    case "conditional": return stmt.branches.map((b) => b.condition);
+    case "case": return [stmt.selector, ...stmt.branches.flatMap((b) => b.labels)];
+    case "for": return [stmt.from, stmt.to, ...(stmt.by ? [stmt.by] : [])];
+    case "while": return [stmt.condition];
+    case "repeat": return [stmt.until];
+    case "call": return stmt.args;
+    case "semantic_operation": return stmt.args.map((a) => a.value);
+    default: return [];
+  }
+}
+
 function operationLoss(op: SemanticOperationNode, ctx: LossContext): SemanticLossRecord | null {
   const disposition = op.disposition;
   if (!disposition || !LOSSY_DISPOSITIONS.has(disposition)) return null;
@@ -128,6 +194,8 @@ function operationLoss(op: SemanticOperationNode, ctx: LossContext): SemanticLos
 
 function walk(stmts: Statement[], ctx: LossContext, out: SemanticLossRecord[]): void {
   for (const s of stmts) {
+    // Conversion losses live in a statement's own expressions (any node kind).
+    for (const e of ownExpressions(s)) walkExpr(e, ctx, out);
     switch (s.node) {
       case "semantic_operation": {
         const rec = operationLoss(s, ctx);
