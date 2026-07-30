@@ -22,7 +22,7 @@ import { emitMEL } from "../emitter";
 import { emitAB } from "../emitter-ab";
 import { buildSemanticProgram } from "../semantic/pipeline";
 import { emitStatements, type StEmitTarget } from "../lowering/st-emitter";
-import { emitDeclarations, declsAreCanonical } from "../lowering/st-decl-emitter";
+import { emitDeclarations, declsAreCanonical, declFamilyOf } from "../lowering/st-decl-emitter";
 import {
   MigrationRegistry,
   defaultRegistry,
@@ -94,21 +94,21 @@ export function compileHybrid(
   let canonicalSegmentCount = 0;
   let legacySegmentCount = 0;
 
-  // ── Declarations (whole-block decision: primitives → canonical) ──────────
+  // ── Declarations (whole-block decision: every decl's family must be active) ─
+  const isActive = (f: MigrationFamily) => reg.isActive(f);
   const rawVarBlocks = rawAst.filter((n) => n.kind === "var_block");
   const locals = program.routines[0].locals;
   if (locals.length > 0) {
-    if (reg.isActive("declarations") && declsAreCanonical(locals)) {
+    if (declsAreCanonical(locals, isActive)) {
       outParts.push(emitDeclarations(locals, target).join("\n"));
       canonicalNodeCount += locals.length;
       canonicalSegmentCount++;
-      for (const _ of locals) bump("declarations", "canonical");
+      for (const d of locals) bump(declFamilyOf(d.type) ?? "declarations", "canonical");
     } else {
       outParts.push(legacyEmit(targetLanguage, rawVarBlocks, sourceLines).output);
       legacyNodeCount += locals.length;
       legacySegmentCount++;
-      const fam: MigrationFamily = declsAreCanonical(locals) ? "declarations" : "arrays_structures";
-      for (const _ of locals) bump(fam, "legacy");
+      for (const d of locals) bump(declFamilyOf(d.type) ?? "arrays_structures", "legacy");
     }
   }
 

@@ -8,30 +8,35 @@
  */
 import type { CanonicalType } from "../ir/types";
 import type { CanonicalVariableDeclaration, VariableDirection } from "../ir/declarations";
+import type { MigrationFamily } from "../migration/families";
+import { emitDeclTypeSpelling } from "../ir/decl-types";
 import { emitExpression, type StEmitTarget } from "./st-emitter";
 
-const INT_NAME: Record<string, string> = {
-  "8:true": "SINT", "8:false": "USINT",
-  "16:true": "INT", "16:false": "UINT",
-  "32:true": "DINT", "32:false": "UDINT",
-  "64:true": "LINT", "64:false": "ULINT",
-};
-
-/** ST spelling for a PRIMITIVE canonical type, or null if not a plain primitive. */
+/** ST spelling for an emittable canonical declaration type (primitive or array), or null. */
 export function canonicalDeclType(t: CanonicalType): string | null {
-  switch (t.kind) {
-    case "boolean": return "BOOL";
-    case "integer": return INT_NAME[`${t.bits}:${t.signed}`] ?? null;
-    case "real": return t.bits === 64 ? "LREAL" : "REAL";
-    case "time": return "TIME";
-    case "string": return t.capacity ? `STRING[${t.capacity}]` : "STRING";
-    default: return null; // array / structure / alias / fb / opaque / unresolved
-  }
+  return emitDeclTypeSpelling(t);
 }
 
-/** True if every declaration is a plain primitive (i.e. the declarations family). */
-export function declsAreCanonical(decls: CanonicalVariableDeclaration[]): boolean {
-  return decls.every((d) => canonicalDeclType(d.type) !== null);
+/** Migration family a declaration type belongs to (primitive → declarations, array → arrays_structures). */
+export function declFamilyOf(t: CanonicalType): MigrationFamily | null {
+  if (t.kind === "array" || t.kind === "structure") return "arrays_structures";
+  return emitDeclTypeSpelling(t) !== null ? "declarations" : null;
+}
+
+/**
+ * True if every declaration is canonically emittable AND its family is active.
+ * `isActive` defaults to treating every family as active (emitter-support check);
+ * routing passes the registry so array declarations require `arrays_structures`.
+ */
+export function declsAreCanonical(
+  decls: CanonicalVariableDeclaration[],
+  isActive: (f: MigrationFamily) => boolean = () => true,
+): boolean {
+  return decls.every((d) => {
+    if (emitDeclTypeSpelling(d.type) === null) return false;
+    const fam = declFamilyOf(d.type);
+    return fam !== null && isActive(fam);
+  });
 }
 
 const SECTION: Record<VariableDirection, string> = {

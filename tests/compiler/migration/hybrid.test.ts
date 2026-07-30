@@ -20,15 +20,19 @@ describe("Stage 2 — mixed-program (hybrid) routing", () => {
     expect(h.output.indexOf("RunTimer(IN :=")).toBeLessThan(h.output.indexOf("w := b;"));
   });
 
-  it("routes a primitive declaration canonically and an array declaration to legacy (mixed)", () => {
+  it("routes a primitive declaration canonically, and a primitive-element array canonically (arrays active)", () => {
     const src = "VAR\n  cnt : DINT;\nEND_VAR\ncnt := cnt + 1;";
     const prim = compileHybrid(src, AB, MEL)!;
     expect(prim.canonicalNodeCount).toBeGreaterThan(0);
     expect(prim.legacyNodeCount).toBe(0);
     const arrSrc = "VAR\n  buf : ARRAY[0..9] OF DINT;\nEND_VAR\nbuf[0] := 1;";
     const arr = compileHybrid(arrSrc, AB, MEL)!;
-    expect(arr.legacyNodeCount).toBeGreaterThan(0); // array decl
-    expect(arr.canonicalNodeCount).toBeGreaterThan(0); // assignment
+    expect(arr.legacyNodeCount).toBe(0); // array of primitive → canonical
+    expect(arr.canonicalNodeCount).toBeGreaterThan(0);
+    expect(arr.output).toContain("ARRAY[0..9] OF DINT");
+    // array of a non-primitive element → declaration not canonically emittable → legacy
+    const udt = compileHybrid("VAR\n  recs : ARRAY[0..3] OF MyUDT;\nEND_VAR\nrecs[0] := 1;", AB, MEL)!;
+    expect(udt.legacyNodeCount).toBeGreaterThan(0);
   });
 
   it("a canonical-active statement containing a legacy node routes to legacy as a unit (no crash, no split)", () => {

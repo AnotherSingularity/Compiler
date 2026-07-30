@@ -10,9 +10,10 @@ import type { LanguageId } from "../contracts/ids";
 import { lineSpan } from "../contracts/source";
 import { nodeIdFromPath, sourceOrigin, type NodeOrigin } from "./nodes";
 import {
-  BOOL, REAL32, REAL64, int, unresolvedType,
+  BOOL, REAL32, int, unresolvedType,
   type CanonicalType,
 } from "./types";
+import { parseDeclType } from "./decl-types";
 import type { Expression, BinaryOperator, ComparisonOperator, LogicalOperator, UnaryOperator, LiteralValueKind } from "./expressions";
 import type { Statement, IfBranch, CaseBranch } from "./statements";
 import type { CanonicalRoutine, CanonicalVariableDeclaration, VariableDirection } from "./declarations";
@@ -45,20 +46,9 @@ function litType(litType: string, raw: string): { valueKind: LiteralValueKind; t
   }
 }
 
-function primitiveType(spelling: string): CanonicalType {
-  const s = spelling.trim().toUpperCase();
-  switch (s) {
-    case "BOOL": return BOOL;
-    case "SINT": case "USINT": case "BYTE": return int(8, s !== "USINT");
-    case "INT": case "UINT": case "WORD": return int(16, s !== "UINT" && s !== "WORD");
-    case "DINT": case "UDINT": case "DWORD": return int(32, s !== "UDINT" && s !== "DWORD");
-    case "LINT": case "ULINT": case "LWORD": return int(64, s !== "ULINT" && s !== "LWORD");
-    case "REAL": return REAL32;
-    case "LREAL": return REAL64;
-    case "TIME": return { kind: "time" };
-    case "STRING": return { kind: "string" };
-    default: return unresolvedType(spelling);
-  }
+/** Parse a declaration type string: primitive, array-of-primitive, else unresolved. */
+function declType(spelling: string): CanonicalType {
+  return parseDeclType(spelling);
 }
 
 function normalizeExpr(node: Ast, ctx: Ctx, path: string): Expression {
@@ -252,7 +242,7 @@ function collectLocals(ast: Ast[], ctx: Ctx, path: string): CanonicalVariableDec
       const p = `${path}/var[${bi}][${di}]/${d.name}`;
       decls.push({
         node: "var_decl", id: nodeIdFromPath(p), origin: origin(ctx, d, "var_decl"),
-        name: d.name, type: primitiveType(d.type), direction,
+        name: d.name, type: declType(d.type), direction,
         storage: node.scope === "VAR_GLOBAL" ? "normal" : "normal",
         initial: d.initial ? normalizeExpr(d.initial, ctx, `${p}/init`) : null,
       });

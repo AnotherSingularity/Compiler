@@ -20,6 +20,9 @@ const SNIPPETS: Array<{ id: string; family: string; source: string }> = [
   { id: "conv_widen", family: "conversions", source: "r := DINT_TO_REAL(n);" },
   { id: "conv_narrow", family: "conversions", source: "n := REAL_TO_INT(r);" },
   { id: "conv_in_expr", family: "conversions", source: "r := DINT_TO_REAL(n) + 0.5;" },
+  // Arrays (canonical_active): bounds preserved exactly (no silent 0-rebasing).
+  { id: "arr_1based", family: "arrays_structures", source: "VAR\n  buf : ARRAY[1..100] OF DINT;\nEND_VAR\nbuf[1] := 5;" },
+  { id: "arr_multidim", family: "arrays_structures", source: "VAR\n  grid : ARRAY[0..9, 0..3] OF INT;\nEND_VAR\ngrid[2, 1] := 7;" },
 ];
 
 export const PARITY_FIXTURES: ParityFixture[] = SNIPPETS.flatMap((s) => [

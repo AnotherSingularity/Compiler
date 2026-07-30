@@ -684,3 +684,26 @@ completeness. Conversions stay canonical beside legacy timers in mixed programs.
 **Gate:** check 0 · test **200 passed/1 skipped** · verify:legacy-parity PASS (26, 0) ·
 verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
 PASS · corpus 7/7 · roundtrip 6/6 · build OK.
+
+## Typed Family Activation — Stage 3: arrays_structures canonical-active
+
+**Files:** `ir/decl-types.ts` (shared parse/emit for primitive + array-of-primitive types);
+`ir/normalize.ts` (array-aware decl typing); `lowering/st-decl-emitter.ts` (array emission +
+family-aware `declsAreCanonical(isActive)` + `declFamilyOf`); `migration/{hybrid,routing}.ts`
+(per-decl family gating); `migration/{fixtures,approvals}.ts` (2 array fixtures, hash-pinned);
+`tests/compiler/semantic/arrays.test.ts` + updated routing/hybrid tests.
+`arrays_structures = canonical_active`.
+
+**Result:** `ARRAY[lo..hi, ...] OF <primitive>` declarations parse into canonical `ArrayType`
+with explicit dimensions and route canonically. Bounds are PRESERVED EXACTLY —
+`ARRAY[1..100]` never silently becomes `ARRAY[0..99]` (both IEC targets accept arbitrary
+bounds, matching the legacy oracle; no rebasing, no spurious loss). Multidimensional arrays,
+negative lower bounds, and array element access all handled. Arrays of non-primitive elements
+(UDTs) remain on the legacy engine (declaration not canonically emittable). STRUCT/UDT are not
+declarable in ST source (they arrive via the L5K project model — Stage 15); member access is
+already covered by the expressions family. Canonical drops the inline `AT D<addr>` allocation
+(a separate hardware-mapping artifact) — same approved convention as primitive declarations.
+
+**Gate:** check 0 · test **209 passed/1 skipped** · verify:legacy-parity PASS (30, 0) ·
+verify:corpus-migration PASS (7, 3 mixed) · verify:semantic-loss PASS · verify:capabilities
+PASS · corpus 7/7 · roundtrip 6/6 · build OK.

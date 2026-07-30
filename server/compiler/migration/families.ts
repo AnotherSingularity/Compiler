@@ -46,7 +46,7 @@ export const DEFAULT_FAMILY_STATUS: Record<MigrationFamily, MigrationStatus> = {
   assignments: "canonical_active",
   control_flow: "canonical_active",
   declarations: "canonical_active",
-  arrays_structures: "legacy_only",
+  arrays_structures: "canonical_active",
   conversions: "canonical_active",
   timers: "legacy_only",
   counters: "legacy_only",

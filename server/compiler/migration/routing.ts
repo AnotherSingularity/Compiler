@@ -17,7 +17,7 @@ import type { Statement } from "../ir/statements";
 import { parseSTSourceWithDiagnostics } from "../parser";
 import { buildSemanticProgram } from "../semantic/pipeline";
 import { emitRoutineBody, type StEmitTarget } from "../lowering/st-emitter";
-import { emitDeclarations, declsAreCanonical } from "../lowering/st-decl-emitter";
+import { emitDeclarations, declsAreCanonical, declFamilyOf } from "../lowering/st-decl-emitter";
 import {
   MigrationRegistry,
   defaultRegistry,
@@ -69,13 +69,10 @@ function analyze(program: CanonicalProgram, reg: MigrationRegistry): Coverage {
   // `arrays_structures` (still legacy) — keep those on the legacy engine.
   const allDecls = [...program.globals, ...program.routines.flatMap((r) => r.locals)];
   if (allDecls.length > 0) {
-    if (!declsAreCanonical(allDecls)) {
-      families.add("arrays_structures");
+    for (const d of allDecls) { const fam = declFamilyOf(d.type); if (fam) families.add(fam); }
+    if (!declsAreCanonical(allDecls, (f) => reg.isActive(f))) {
       covered = false;
-      reasons.push("non-primitive declaration (arrays_structures) not canonical_active");
-    } else {
-      families.add("declarations");
-      if (!reg.isActive("declarations")) { covered = false; reasons.push("declarations not canonical_active"); }
+      reasons.push("declaration family not canonical_active or type not canonically emittable");
     }
   }
 
