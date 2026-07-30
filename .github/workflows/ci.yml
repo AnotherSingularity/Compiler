@@ -8,7 +8,7 @@ on:
 
 jobs:
   compiler:
-    name: typecheck · tests · corpus · roundtrip · build
+    name: typecheck · tests · verify gates · corpus · roundtrip · build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,6 +33,18 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+      - name: Legacy parity (canonical vs legacy oracle)
+        run: pnpm verify:legacy-parity
+
+      - name: Corpus migration (nonzero canonical nodes)
+        run: pnpm verify:corpus-migration
+
+      - name: Semantic-loss honesty (losses ⟺ not complete)
+        run: pnpm verify:semantic-loss
+
+      - name: Capability consistency (manifest is authoritative)
+        run: pnpm verify:capabilities
 
       - name: Corpus harness
         run: pnpm test:corpus
