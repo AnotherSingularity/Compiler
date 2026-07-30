@@ -21,6 +21,7 @@ import { emitMEL } from "../emitter";
 import { emitAB } from "../emitter-ab";
 import { normalizeStProgram } from "../ir/normalize";
 import { normalizeProgramOperations } from "../semantic/operation-normalization";
+import { resolveProgram } from "../semantic/resolver";
 import { emitStatements, type StEmitTarget } from "../lowering/st-emitter";
 import { emitDeclarations, declsAreCanonical } from "../lowering/st-decl-emitter";
 import {
@@ -72,7 +73,9 @@ export function compileHybrid(
   const sourceLines = source.split("\n");
   const rawAst = parsed.ast;
 
-  const program = normalizeProgramOperations(normalizeStProgram("MAIN", rawAst, { sourceId: "<input>", language: sourceLanguage }));
+  const program = resolveProgram(
+    normalizeProgramOperations(normalizeStProgram("MAIN", rawAst, { sourceId: "<input>", language: sourceLanguage })),
+  );
   const canonicalBody = program.routines[0].body;
   const rawBody = rawAst.filter((n) => n.kind !== "var_block" && n.kind !== "comment");
   if (rawBody.length !== canonicalBody.length) return null; // alignment safety

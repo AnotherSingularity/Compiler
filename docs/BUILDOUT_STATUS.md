@@ -544,3 +544,18 @@ the semantic resolver + typed lowering and are the next work items.
 **Honest status:** `compile()` uses mixed canonical/legacy routing. Legacy `translate()` is
 still the whole-program legacy engine (Stage 11 flip pending — it needs the same hybrid path;
 deferred to keep this commit verified and bounded).
+
+---
+
+## Typed Semantic Core — Stage 0: reconciliation (verified start state)
+
+**Verified start:** branch `claude/happy-johnson-dy7zxl`, HEAD = remote HEAD =
+`3fbf55d`, clean tree. CI run `30542034769` for `3fbf55d` = **completed/success**.
+
+**Full gate at start (2026-07-30):** `pnpm install --frozen-lockfile` 0 · `pnpm check` 0 ·
+`pnpm test` **161 passed, 1 skipped** · `pnpm verify:legacy-parity` PASS (20, 0 unapproved) ·
+`pnpm verify:corpus-migration` PASS (7 fixtures, 3 mixed, 0 whole-program-legacy) · corpus
+7/7 · roundtrip 6/6 · build OK.
+
+This is the reconciled base for the Typed Semantic Core / Loss Enforcement / Legacy-API
+Migration order. Work proceeds in small verified commits from here.
